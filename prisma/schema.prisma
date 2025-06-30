@@ -1,0 +1,58 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// --- YOUR DATABASE MODELS ---
+
+// prisma/schema.prisma
+
+model User {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  name      String
+  isAdmin   Boolean  @default(false)
+  createdAt DateTime @default(now())
+  
+  // A User can now have MANY Cards
+  cards     Card[]
+}
+
+model Card {
+  id        Int     @id @default(autoincrement())
+  code      BigInt  @unique
+  issuedTo  User?   @relation(fields: [userId], references: [id])
+  userId    Int?    // The @unique attribute has been REMOVED from this line
+
+  // A Card can have many Permissions
+  permissions Permission[]
+}
+
+model Elevator {
+  id          Int      @id @default(autoincrement())
+  name        String   // e.g., "Main Lobby Elevator"
+  location    String   // e.g., "Building A"
+  
+  // An Elevator can be part of many Permissions
+  permissions Permission[]
+}
+
+model Permission {
+  id        Int     @id @default(autoincrement())
+  card      Card    @relation(fields: [cardId], references: [id])
+  cardId    Int
+  elevator  Elevator @relation(fields: [elevatorId], references: [id])
+  elevatorId Int
+  
+  // The specific relay (floor) this card can access on this elevator
+  relay     Int     
+  
+  @@unique([cardId, elevatorId, relay]) // Prevents duplicate permissions
+}
