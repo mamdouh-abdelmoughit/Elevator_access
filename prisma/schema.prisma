@@ -56,3 +56,10 @@ model Permission {
   
   @@unique([cardId, elevatorId, relay]) // Prevents duplicate permissions
 }
+
+model Log {
+  id        Int      @id @default(autoincrement())
+  timestamp DateTime @default(now())
+  eventType String   // e.g., "ACCESS_ATTEMPT", "ENROLLMENT", "FAULT"
+  details   Json     // A flexible JSON object for details
+}
