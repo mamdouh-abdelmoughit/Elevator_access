@@ -10,9 +10,6 @@
 #include <Adafruit_MCP23X17.h> // Using the library you specified
 #include <Wire.h>
 
-// ======================================================
-//      CONFIGURATION - !!! EDIT THIS SECTION LATER !!!
-// ======================================================
 
 // --- Wi-Fi Credentials ---
 const char* WIFI_SSID = "YOUR_WIFI_SSID";
