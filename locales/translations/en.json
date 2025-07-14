@@ -1,0 +1,19 @@
+{
+  "translation": {
+    "welcomeBack": "Welcome Back!",
+    "login": "Login",
+    "enterEmail": "Enter your email",
+    "dontHaveAccount": "Don't have an account? Sign Up",
+    "createAccount": "Create an Account",
+    "enterName": "Enter your name",
+    "signUp": "Sign Up",
+    "alreadyHaveAccount": "Already have an account? Login",
+    "homeTitle": "Home Screen",
+    "loggedInSuccess": "You are successfully logged in!",
+    "errorTitle": "Error",
+    "successTitle": "Success",
+    "fillAllFields": "Please fill in all fields.",
+    "userCreated": "User \"{{name}}\" created with ID: {{id}}",
+    "networkError": "Could not connect to the server."
+  }
+}

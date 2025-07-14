@@ -1,0 +1,19 @@
+{
+  "translation": {
+    "welcomeBack": "Content de vous revoir!",
+    "login": "Se connecter",
+    "enterEmail": "Entrez votre e-mail",
+    "dontHaveAccount": "Pas de compte? S'inscrire",
+    "createAccount": "Créer un compte",
+    "enterName": "Entrez votre nom",
+    "signUp": "S'inscrire",
+    "alreadyHaveAccount": "Déjà un compte? Se connecter",
+    "homeTitle": "Écran d'accueil",
+    "loggedInSuccess": "Vous êtes connecté avec succès!",
+    "errorTitle": "Erreur",
+    "successTitle": "Succès",
+    "fillAllFields": "Veuillez remplir tous les champs.",
+    "userCreated": "Utilisateur \"{{name}}\" créé avec l'ID : {{id}}",
+    "networkError": "Impossible de se connecter au serveur."
+  }
+}
