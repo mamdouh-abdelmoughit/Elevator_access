@@ -15,17 +15,22 @@ datasource db {
 // prisma/schema.prisma
 
 // prisma/schema.prisma
+enum Role {
+  ADMIN
+  EMPLOYEE
+  RESIDENT // Good to have for future expansion
+}
 
 model User {
   id        Int      @id @default(autoincrement())
-  email     String   @unique
+  phone     String   @unique // Phone number is now the unique identifier
   name      String
-  isAdmin   Boolean  @default(false)
+  password  String   
+  role      Role     @default(RESIDENT) // Assign a role to every user
   createdAt DateTime @default(now())
   cards     Card[]
 
-  // --- NEW GEOLOCATION FIELDS ---
-  isEmployee         Boolean?  @default(false)
+  // Geolocation fields are now mainly for employees
   latitude           Float?
   longitude          Float?
   locationUpdatedAt  DateTime?

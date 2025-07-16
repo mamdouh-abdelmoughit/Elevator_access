@@ -23,15 +23,13 @@ export const getNearbyEmployees = async (req, res) => {
             return res.status(404).json({ error: 'Elevator not found or has no location data.' });
         }
 
-        // 2. Find all users who are employees and have a recent location
         const employees = await prisma.user.findMany({
             where: {
-                isEmployee: true,
+                role: 'EMPLOYEE', // <-- THE IMPORTANT CHANGE
                 latitude: { not: null },
                 longitude: { not: null },
             },
         });
-
         // 3. Calculate the distance for each employee
         const employeesWithDistance = employees.map(emp => {
             const distance = calculateDistance(
@@ -49,6 +47,17 @@ export const getNearbyEmployees = async (req, res) => {
     } catch (error) {
         console.error("Error finding nearby employees:", error);
         res.status(500).json({ error: 'Could not find nearby employees.' });
+    }
+};
+
+export const getElevatorById = async (req, res) => {
+    const elevatorId = parseInt(req.params.id);
+    try {
+        const elevator = await prisma.elevator.findUnique({ where: { id: elevatorId } });
+        if (!elevator) return res.status(404).json({ error: 'Elevator not found.' });
+        res.json(elevator);
+    } catch (error) {
+        res.status(500).json({ error: 'Could not fetch elevator.' });
     }
 };
 
