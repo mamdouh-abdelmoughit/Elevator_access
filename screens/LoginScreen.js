@@ -1,25 +1,64 @@
 // screens/LoginScreen.js
-import React from 'react';
-import { View, Text, TextInput, Button, StyleSheet, TouchableOpacity } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, TextInput, Button, StyleSheet, TouchableOpacity, Alert, SafeAreaView} from 'react-native';
 import { useTranslation } from 'react-i18next';
+import * as SecureStore from 'expo-secure-store'; 
+
+
+const API_URL = 'http://172.20.10.2:3000';
 
 export default function LoginScreen({ navigation }) {
   const { t } = useTranslation();
-  // ... (handleLogin logic will be added later)
+  const [phone, setPhone] = useState('');
+  const [password, setPassword] = useState('');
+
+  const handleLogin = async () => {
+    try {
+      const response = await fetch(`${API_URL}/users/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, password }),
+      });
+      const userData = await response.json();
+      if (response.ok) {
+        await SecureStore.setItemAsync('currentUser', JSON.stringify(userData));
+        console.log('User data saved to secure store.');
+        // Login successful! Navigate to HomeScreen and pass user data.
+        navigation.replace('Home', { user: userData });
+      } else {
+        Alert.alert(t('errorTitle'), userData.error || "Login failed");
+      }
+    } catch (error) {
+      Alert.alert(t('errorTitle'), t('networkError'));
+    }
+  };
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
+        <View style={styles.innerContainer}>
       <Text style={styles.title}>{t('welcomeBack')}</Text>
-      <TextInput style={styles.input} placeholder={t('enterEmail')} keyboardType="email-address" autoCapitalize="none" />
-      <Button title={t('login')} onPress={() => navigation.replace('Home')} />
+      <TextInput style={styles.input} placeholder="Enter phone number" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
+      <TextInput style={styles.input} placeholder="Enter password" value={password} onChangeText={setPassword} secureTextEntry />
+      <Button title={t('login')} onPress={handleLogin} />
       <TouchableOpacity onPress={() => navigation.navigate('Signup')}>
         <Text style={styles.linkText}>{t('dontHaveAccount')}</Text>
       </TouchableOpacity>
-    </View>
+      </View>
+    </SafeAreaView>
   );
 }
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: 'center', padding: 20 },
+  // The main container now just makes sure it fills the screen
+  container: { 
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  // We put the old styling into an inner container
+  innerContainer: {
+    flex: 1,
+    justifyContent: 'center', 
+    padding: 20 
+  },
   title: { fontSize: 24, fontWeight: 'bold', textAlign: 'center', marginBottom: 20 },
   input: { width: '100%', height: 40, borderColor: 'gray', borderWidth: 1, borderRadius: 5, marginBottom: 15, paddingHorizontal: 10 },
   linkText: { color: 'blue', textAlign: 'center', marginTop: 20 },

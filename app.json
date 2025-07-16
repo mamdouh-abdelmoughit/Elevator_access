@@ -6,27 +6,64 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.yourcompany.elevatorapp",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "This app uses your location to show your position to the administrator for dispatch.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "This app uses your location in the background to show your position to the administrator for dispatch, even when the app is closed.",
+        "NSLocationAlwaysUsageDescription": "This app requires background location access to function correctly for on-call duty.",
+        "UIBackgroundModes": [
+          "location",
+          "fetch"
+        ]
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true
+      "package": "com.yourcompany.elevatorapp",
+      "permissions": [
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.FOREGROUND_SERVICE_LOCATION"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-localization"
-    ]
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow $(PRODUCT_NAME) to use your location for 24/7 on-call dispatch.",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
+        }
+      ],
+      [
+        "expo-task-manager",
+        {
+          "isHeadless": true
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "56717eed-bd26-4839-b7a6-52fbbb92a6df"
+      }
+    }
   }
 }
