@@ -1,64 +1,69 @@
 // screens/MapScreen.js
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ActivityIndicator, Alert, Text } from 'react-native';
-import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
-import { useTranslation } from 'react-i18next';
+import { View, StyleSheet, ActivityIndicator, Alert, Text, TouchableOpacity, Image } from 'react-native';
+import MapView, { Marker, PROVIDER_GOOGLE, Callout } from 'react-native-maps';
+import * as SecureStore from 'expo-secure-store';
+import { Linking } from 'react-native';
 
-const API_URL = 'http://172.20.10.2:3000';
-// For this test, we are hardcoding the elevator we want to view.
-const TARGET_ELEVATOR_ID = 1;
+const API_URL = process.env.EXPO_PUBLIC_API_URL;
+
+// Default view: Center of Morocco
+const INITIAL_REGION = {
+  latitude: 31.7917,
+  longitude: -7.0926,
+  latitudeDelta: 5,
+  longitudeDelta: 5,
+};
 
 export default function MapScreen() {
-  const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
-  const [mapRegion, setMapRegion] = useState(null);
-  const [elevator, setElevator] = useState(null);
-  const [employees, setEmployees] = useState([]);
+  const [elevators, setElevators] = useState([]);
+  const [technicians, setTechnicians] = useState([]);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        // Fetch the elevator's own location first to center the map
-        // NOTE: We need to create a GET /elevators/:id endpoint
-        const elevatorResponse = await fetch(`${API_URL}/elevators/${TARGET_ELEVATOR_ID}`);
-        const elevatorData = await elevatorResponse.json();
-        if (!elevatorResponse.ok || !elevatorData.latitude) {
-          throw new Error('Elevator location not found.');
-        }
-        setElevator(elevatorData);
+  const fetchData = async () => {
+    try {
+      const token = await SecureStore.getItemAsync('authToken');
+      
+      // 1. Fetch ALL Elevators
+      const elevResp = await fetch(`${API_URL}/elevators`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const elevData = await elevResp.json();
 
-        // Center the map on the elevator
-        const initialRegion = {
-          latitude: elevatorData.latitude,
-          longitude: elevatorData.longitude,
-          latitudeDelta: 0.0922,
-          longitudeDelta: 0.0421,
-        };
-        setMapRegion(initialRegion);
+      // 2. Fetch ALL Users (and filter for Employees with location)
+      const userResp = await fetch(`${API_URL}/users`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const userData = await userResp.json();
 
-        // Now fetch the nearby employees
-        const employeesResponse = await fetch(`${API_URL}/elevators/${TARGET_ELEVATOR_ID}/nearby-employees`);
-        const employeesData = await employeesResponse.json();
-        if (!employeesResponse.ok) {
-          throw new Error('Could not fetch employees.');
-        }
-        setEmployees(employeesData);
-
-      } catch (error) {
-        Alert.alert(t('errorTitle'), error.message);
-      } finally {
-        setLoading(false);
+      if (elevResp.ok) setElevators(elevData);
+      
+      if (userResp.ok) {
+        // Filter: Only Employees who have a recorded location
+        const activeTechs = userData.filter(u => 
+            u.role === 'EMPLOYEE' && u.latitude && u.longitude
+        );
+        setTechnicians(activeTechs);
       }
-    };
 
-    fetchData();
-  }, []);
-    const handleCall = (phoneNumber) => {
-    if (phoneNumber) {
-      Linking.openURL(`tel:${phoneNumber}`);
-    } else {
-      Alert.alert("Cannot Call", "This employee does not have a phone number registered.");
+    } catch (error) {
+      Alert.alert("Error", "Could not load map data.");
+    } finally {
+      setLoading(false);
     }
+  };
+
+  // Refresh data every time the screen opens
+  useEffect(() => {
+    fetchData();
+    
+    // Optional: Auto-refresh every 10 seconds to see Technicians moving
+    const interval = setInterval(fetchData, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleCall = (phone) => {
+    Linking.openURL(`tel:${phone}`);
   };
 
   if (loading) {
@@ -67,45 +72,81 @@ export default function MapScreen() {
 
   return (
     <View style={styles.container}>
-      <MapView style={styles.map} initialRegion={mapRegion} provider={PROVIDER_GOOGLE}>
-        {/* Place a marker for the elevator */}
-        {elevator && (
+      <MapView 
+        style={styles.map} 
+        initialRegion={INITIAL_REGION} 
+        provider={PROVIDER_GOOGLE}
+      >
+        {/* --- RENDER ELEVATORS (Blue Markers) --- */}
+        {elevators.map(elev => (
           <Marker
-            coordinate={{ latitude: elevator.latitude, longitude: elevator.longitude }}
-            title={elevator.name}
-            description={elevator.location}
-            pinColor="blue" // Elevator is blue
-          />
-        )}
-        {/* Employee Markers with Call functionality */}
-        {employees.map(emp => (
-          <Marker
-            key={emp.id}
-            coordinate={{ latitude: emp.latitude, longitude: emp.longitude }}
-            title={emp.name}
-            description={`Tap to call ${emp.phone}`}
-            pinColor="green"
-            // This event fires when the user taps the text bubble (callout)
-            onCalloutPress={() => handleCall(emp.phone)}
-          />
+            key={`elev-${elev.id}`}
+            coordinate={{ latitude: elev.latitude, longitude: elev.longitude }}
+            pinColor="blue"
+            title={elev.name}
+            description={elev.location}
+          >
+            <Callout>
+                <View style={styles.calloutView}>
+                    <Text style={styles.calloutTitle}>🏢 {elev.name}</Text>
+                    <Text>{elev.location}</Text>
+                    <Text style={{fontWeight:'bold', color:'blue'}}>
+                        Status: {elev.currentStatus || "Unknown"}
+                    </Text>
+                </View>
+            </Callout>
+          </Marker>
         ))}
-        {/* Place a marker for each employee */}
-        {employees.map(emp => (
+
+        {/* --- RENDER TECHNICIANS (Green Markers) --- */}
+        {technicians.map(tech => (
           <Marker
-            key={emp.id}
-            coordinate={{ latitude: emp.latitude, longitude: emp.longitude }}
-            title={emp.name}
-            description={`Distance: ${emp.distance_km.toFixed(2)} km`}
-            pinColor="green" // Employees are green
-          />
+            key={`tech-${tech.id}`}
+            coordinate={{ latitude: tech.latitude, longitude: tech.longitude }}
+            pinColor="green"
+            title={tech.name}
+          >
+            <Callout onPress={() => handleCall(tech.phone)}>
+                <View style={styles.calloutView}>
+                    <Text style={styles.calloutTitle}>👷 {tech.name}</Text>
+                    <Text>Phone: {tech.phone}</Text>
+                    <Text style={{color: 'green', marginTop: 5}}>Tap to Call</Text>
+                </View>
+            </Callout>
+          </Marker>
         ))}
       </MapView>
+
+      {/* Legend / Info Box */}
+      <View style={styles.legend}>
+        <Text style={{color: 'blue', fontWeight: 'bold'}}>● Elevators ({elevators.length})</Text>
+        <Text style={{color: 'green', fontWeight: 'bold'}}>● Technicians ({technicians.length})</Text>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { ...StyleSheet.absoluteFillObject, justifyContent: 'flex-end', alignItems: 'center' },
+  container: { ...StyleSheet.absoluteFillObject },
   map: { ...StyleSheet.absoluteFillObject },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  legend: {
+    position: 'absolute',
+    bottom: 20,
+    left: 20,
+    backgroundColor: 'white',
+    padding: 10,
+    borderRadius: 8,
+    elevation: 5,
+    gap: 5
+  },
+  calloutView: {
+    width: 150,
+    padding: 5,
+    alignItems: 'center'
+  },
+  calloutTitle: {
+    fontWeight: 'bold',
+    marginBottom: 5
+  }
 });

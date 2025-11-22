@@ -3,6 +3,7 @@ import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import MapScreen from './screens/MapScreen'; 
+import AddElevatorScreen from './screens/AddElevatorScreen';
 import * as TaskManager from 'expo-task-manager';
 import * as Location from 'expo-location';
 import * as SecureStore from 'expo-secure-store'; // <-- IMPORT
@@ -15,15 +16,16 @@ import SignupScreen from './screens/SignupScreen';
 
 const LOCATION_TASK_NAME = 'background-location-task';
 // Use your backend address (same as other screens). If you run backend on device/emulator, adjust accordingly.
-const API_URL = 'http://172.20.10.2:3000';
+const API_URL = 'http://192.168.0.193:3000';
 
 // Background task definition.
 // This task runs even when the app is backgrounded (Expo taskManager + location set up required).
-TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
+/*TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
   if (error) {
     console.error('Background Task Error:', error);
     return;
   }
+
 
   if (!data || !data.locations || data.locations.length === 0) {
     // Nothing to do
@@ -87,7 +89,7 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
     console.error('Background Task: Unexpected error', e);
   }
 });
-
+*/
 // Navigation stack
 const Stack = createNativeStackNavigator();
 
@@ -99,6 +101,7 @@ export default function App() {
         <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
         <Stack.Screen name="Signup" component={SignupScreen} options={{ title: 'Create Account' }} />
         <Stack.Screen name="Home" component={HomeScreen} options={{ title: 'Elevator Dashboard' }} />
+        <Stack.Screen name="AddElevator" component={AddElevatorScreen} options={{ title: 'Install New Elevator' }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

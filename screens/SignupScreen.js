@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { View, Text, TextInput, Button, StyleSheet, Alert, TouchableOpacity, SafeAreaView} from 'react-native';
 import { useTranslation } from 'react-i18next';
 
-const API_URL = 'http://172.20.10.2:3000';
+const API_URL = process.env.EXPO_PUBLIC_API_URL;
 
 export default function SignupScreen({ navigation }) {
   const { t } = useTranslation();

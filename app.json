@@ -18,9 +18,9 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.yourcompany.elevatorapp",
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "This app uses your location to show your position to the administrator for dispatch.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "This app uses your location in the background to show your position to the administrator for dispatch, even when the app is closed.",
-        "NSLocationAlwaysUsageDescription": "This app requires background location access to function correctly for on-call duty.",
+        "NSLocationWhenInUseUsageDescription": "This app uses your location to show your position to the administrator.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "This app tracks your location in the background for dispatching.",
+        "NSLocationAlwaysUsageDescription": "This app requires background location access.",
         "UIBackgroundModes": [
           "location",
           "fetch"
@@ -58,7 +58,9 @@
         {
           "isHeadless": true
         }
-      ]
+      ],
+      "expo-localization",
+      "expo-secure-store"
     ],
     "extra": {
       "eas": {

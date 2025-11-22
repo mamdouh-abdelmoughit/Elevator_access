@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import * as SecureStore from 'expo-secure-store'; 
 
 
-const API_URL = 'http://172.20.10.2:3000';
+const API_URL = process.env.EXPO_PUBLIC_API_URL;
 
 export default function LoginScreen({ navigation }) {
   const { t } = useTranslation();
