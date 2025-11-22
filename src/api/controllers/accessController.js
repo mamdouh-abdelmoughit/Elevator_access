@@ -60,7 +60,7 @@ export const handleAccessEvent = async (elevatorId, cardCode) => {
         card_code: cardCodeString,
         relay: permission.relay
       };
-      publish(responseTopic, JSON.stringify(msg));
+     // publish(responseTopic, JSON.stringify(msg));
     } else {
       console.log(`Access DENIED. Card ${cardCodeString} has no permission for elevator ${elevatorId}.`);
       createLog("ACCESS_ATTEMPT", {
