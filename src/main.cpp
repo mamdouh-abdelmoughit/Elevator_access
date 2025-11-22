@@ -16,7 +16,7 @@ const char* WIFI_SSID = "YOUR_WIFI_SSID";
 const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
 
 // --- Backend and MQTT Configuration ---
-const char* BACKEND_SERVER = "192.168.x.x"; // Your computer's IP address
+const char* BACKEND_SERVER = "192.168.196.1"; // Your computer's IP address
 const int   BACKEND_PORT = 3000;
 const char* MQTT_BROKER = "broker.hivemq.com";
 const int   MQTT_PORT = 1883; // Standard MQTT port
