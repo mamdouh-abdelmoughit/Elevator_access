@@ -15,7 +15,8 @@ const INITIAL_REGION = {
   longitudeDelta: 5,
 };
 
-export default function MapScreen() {
+// 1. CRITICAL CHANGE: Added { navigation } here so we can use it later
+export default function MapScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [elevators, setElevators] = useState([]);
   const [technicians, setTechnicians] = useState([]);
@@ -47,7 +48,8 @@ export default function MapScreen() {
       }
 
     } catch (error) {
-      Alert.alert("Error", "Could not load map data.");
+      // Alert.alert("Error", "Could not load map data."); // Optional to suppress noise
+      console.log(error);
     } finally {
       setLoading(false);
     }
@@ -86,12 +88,19 @@ export default function MapScreen() {
             title={elev.name}
             description={elev.location}
           >
-            <Callout>
+            {/* 2. THE NEW CALLOUT BLOCK GOES HERE */}
+            <Callout onPress={() => navigation.navigate('ElevatorDetail', { 
+                elevatorId: elev.id, 
+                elevatorName: elev.name 
+            })}>
                 <View style={styles.calloutView}>
                     <Text style={styles.calloutTitle}>🏢 {elev.name}</Text>
                     <Text>{elev.location}</Text>
-                    <Text style={{fontWeight:'bold', color:'blue'}}>
+                    <Text style={{fontWeight:'bold', color:'black', marginVertical: 2}}>
                         Status: {elev.currentStatus || "Unknown"}
+                    </Text>
+                    <Text style={{color: 'blue', marginTop: 5, fontWeight: 'bold'}}>
+                        Tap for Controls ➔
                     </Text>
                 </View>
             </Callout>
@@ -141,12 +150,13 @@ const styles = StyleSheet.create({
     gap: 5
   },
   calloutView: {
-    width: 150,
+    width: 180, // Made slightly wider for the new text
     padding: 5,
     alignItems: 'center'
   },
   calloutTitle: {
     fontWeight: 'bold',
-    marginBottom: 5
+    marginBottom: 5,
+    fontSize: 16
   }
 });
