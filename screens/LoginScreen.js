@@ -12,26 +12,27 @@ export default function LoginScreen({ navigation }) {
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
 
-  const handleLogin = async () => {
-    try {
-      const response = await fetch(`${API_URL}/users/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone, password }),
-      });
-      const userData = await response.json();
-      if (response.ok) {
-        await SecureStore.setItemAsync('currentUser', JSON.stringify(userData));
-        console.log('User data saved to secure store.');
-        // Login successful! Navigate to HomeScreen and pass user data.
-        navigation.replace('Home', { user: userData });
-      } else {
-        Alert.alert(t('errorTitle'), userData.error || "Login failed");
-      }
-    } catch (error) {
-      Alert.alert(t('errorTitle'), t('networkError'));
+const handleLogin = async () => {
+  try {
+    const response = await fetch(`${API_URL}/users/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone, password }),
+    });
+    const data = await response.json();
+    if (response.ok) {
+      // data = { token, user }
+      await SecureStore.setItemAsync('authToken', data.token);
+      await SecureStore.setItemAsync('currentUser', JSON.stringify(data.user));
+      navigation.replace('Home', { user: data.user });
+    } else {
+      Alert.alert(t('errorTitle'), data.error || "Login failed");
     }
-  };
+  } catch (error) {
+    Alert.alert(t('errorTitle'), t('networkError'));
+  }
+};
+
 
   return (
     <SafeAreaView style={styles.container}>
