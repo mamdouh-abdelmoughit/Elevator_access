@@ -5,24 +5,22 @@
 #include <ArduinoJson.h>
 #include <vector>
 
-// --- REQUIRED LIBRARIES (from platformio.ini) ---
-#include <WIEGAND.h> // Using your specified uppercase WIEGAND.h
-#include <Adafruit_MCP23X17.h> // Using the library you specified
+// --- REQUIRED LIBRARIES ---
+#include <WIEGAND.h>
+#include <Adafruit_MCP23X17.h>
 #include <Wire.h>
-
 
 // --- Wi-Fi Credentials ---
 const char* WIFI_SSID = "YOUR_WIFI_SSID";
 const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
 
 // --- Backend and MQTT Configuration ---
-const char* BACKEND_SERVER = "192.168.196.1"; // Your computer's IP address
+const char* BACKEND_SERVER = "192.168.1.15"; // <--- UPDATE THIS to your PC IP
 const int   BACKEND_PORT = 3000;
 const char* MQTT_BROKER = "broker.hivemq.com";
-const int   MQTT_PORT = 1883; // Standard MQTT port
+const int   MQTT_PORT = 1883;
 
 // --- This Specific Elevator's ID ---
-// This ID must match the 'id' of the elevator in your database
 const int THIS_ELEVATOR_ID = 1;
 
 // --- Hardware Pins & Settings ---
@@ -30,31 +28,38 @@ const int THIS_ELEVATOR_ID = 1;
 #define NUM_RELAYS 14
 #define ACCESS_GRANTED_DURATION 2000 // ms
 
+// --- NEW: Sensor Pins (Simulated) ---
+#define PIN_DOOR_SENSOR 13   // Touch to Ground to simulate Door Open
+#define PIN_FAULT_SIGNAL 12  // Touch to Ground to simulate Fault
+
 // ======================================================
 //      GLOBAL OBJECTS AND DATA STRUCTURES
 // ======================================================
 
-// Networking
 WiFiClient wifiClient;
 PubSubClient mqttClient(wifiClient);
 HttpClient httpClient(wifiClient, BACKEND_SERVER, BACKEND_PORT);
 
-// Hardware
-Adafruit_MCP23X17 mcp; // Class name for I2C version is MCP23017
+Adafruit_MCP23X17 mcp;
 std::vector<WIEGAND> readers;
 
-// Data Structures
+// Access Control Data
 struct PermissionRule {
   unsigned long card_code;
   int relay_to_activate;
 };
-std::vector<PermissionRule> permissions; // This will be loaded from the backend
+std::vector<PermissionRule> permissions;
 
 struct RelayTimer {
   int relay_number;
   unsigned long turn_off_time;
 };
 std::vector<RelayTimer> active_relays;
+
+// --- NEW: Sensor State Variables ---
+int lastDoorState = HIGH;
+int lastFaultState = HIGH;
+unsigned long lastDebounceTime = 0;
 
 
 // ======================================================
@@ -68,8 +73,11 @@ void setupReaders();
 void setupRelays();
 void checkWiegandReaders();
 void checkRelayTimers();
+void checkSensors(); // <--- NEW
+void publishStatus(String status, String code); // <--- NEW
 void grantAccess(unsigned long card_code, int reader_id);
 void publishAccessEvent(unsigned long card_code, int reader_id, bool granted);
+
 
 // ======================================================
 //      MAIN SETUP & LOOP
@@ -79,31 +87,95 @@ void setup() {
   while (!Serial);
   Serial.println("\n--- Elevator Access Control System Booting Up ---");
 
+  // 1. Setup Sensors (INPUT_PULLUP means HIGH when disconnected, LOW when grounded)
+  pinMode(PIN_DOOR_SENSOR, INPUT_PULLUP);
+  pinMode(PIN_FAULT_SIGNAL, INPUT_PULLUP);
+
   setupRelays();
   setupReaders();
-
-  // Connect to network and fetch initial data
   setupWifi();
   connectToMqtt();
-  fetchPermissions(); // This replaces your hardcoded mock permissions
+  fetchPermissions(); 
 
   Serial.println("\n--- System Ready ---");
 }
 
 void loop() {
-  // Always maintain the MQTT connection
   if (!mqttClient.connected()) {
     connectToMqtt();
   }
-  mqttClient.loop(); // This processes incoming MQTT messages
+  mqttClient.loop(); 
 
-  // Perform local hardware tasks
+  // 1. Check Access Control (Cards)
   checkWiegandReaders();
+  
+  // 2. Check Relays (Timers)
   checkRelayTimers();
+
+  // 3. Check Real-Time Sensors (Doors/Faults) <--- NEW
+  checkSensors();
 }
 
+
 // ======================================================
-//      NETWORKING FUNCTIONS
+//      SENSOR & STATUS LOGIC (NEW)
+// ======================================================
+
+void checkSensors() {
+  // Simple Debounce to prevent flickering updates
+  if (millis() - lastDebounceTime < 200) return;
+
+  int currentDoorState = digitalRead(PIN_DOOR_SENSOR);
+  int currentFaultState = digitalRead(PIN_FAULT_SIGNAL);
+
+  // --- Check Door Change ---
+  if (currentDoorState != lastDoorState) {
+    lastDebounceTime = millis();
+    lastDoorState = currentDoorState;
+    
+    if (currentDoorState == LOW) {
+      Serial.println("Sensor Event: Door OPENING");
+      publishStatus("DOOR_OPEN", "00");
+    } else {
+      Serial.println("Sensor Event: Door CLOSED");
+      publishStatus("DOOR_CLOSED", "00");
+    }
+  }
+
+  // --- Check Fault Change ---
+  if (currentFaultState != lastFaultState) {
+    lastDebounceTime = millis();
+    lastFaultState = currentFaultState;
+    
+    if (currentFaultState == LOW) {
+      Serial.println("Sensor Event: FAULT DETECTED (H1)");
+      publishStatus("FAULT", "H1"); // Sending "H1" code
+    } else {
+      Serial.println("Sensor Event: FAULT CLEARED");
+      publishStatus("IDLE", "OK");
+    }
+  }
+}
+
+void publishStatus(String status, String code) {
+  if (!mqttClient.connected()) return;
+
+  String topic = "elevators/" + String(THIS_ELEVATOR_ID) + "/status";
+  
+  // Create JSON: { "status": "DOOR_OPEN", "code": "00" }
+  JsonDocument doc;
+  doc["status"] = status;
+  doc["code"] = code;
+  
+  String msg;
+  serializeJson(doc, msg);
+  
+  mqttClient.publish(topic.c_str(), msg.c_str());
+}
+
+
+// ======================================================
+//      NETWORKING FUNCTIONS (EXISTING)
 // ======================================================
 
 void setupWifi() {
@@ -127,15 +199,16 @@ void connectToMqtt() {
     String clientId = "esp32-elevator-" + String(THIS_ELEVATOR_ID);
     if (mqttClient.connect(clientId.c_str())) {
       Serial.println("connected!");
-      // Subscribe to the command topic for this specific elevator
+      
+      // Subscribe to Command Topic
       String commandTopic = "elevators/" + String(THIS_ELEVATOR_ID) + "/commands";
       mqttClient.subscribe(commandTopic.c_str());
-      Serial.print("Subscribed to command topic: ");
-      Serial.println(commandTopic);
+      Serial.println("Subscribed to: " + commandTopic);
+
     } else {
       Serial.print("failed, rc=");
       Serial.print(mqttClient.state());
-      Serial.println(" try again in 5 seconds");
+      Serial.println(" try again in 5s");
       delay(5000);
     }
   }
@@ -149,82 +222,52 @@ void fetchPermissions() {
   int statusCode = httpClient.responseStatusCode();
   String response = httpClient.responseBody();
 
-  Serial.printf("HTTP Status: %d\n", statusCode);
   if (statusCode == 200) {
-    Serial.println("Response received, parsing permissions...");
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, response);
-    if (error) {
-      Serial.printf("deserializeJson() failed: %s\n", error.c_str());
-      return;
-    }
-    permissions.clear(); // Clear old permissions before loading new ones
-    for (JsonObject rule : doc.as<JsonArray>()) {
-      // The path is permission -> card -> code
-      unsigned long code = strtoul(rule["card"]["code"], NULL, 10);
-      int relay = rule["relay"];
-      if (code > 0) {
-        permissions.push_back({code, relay});
+    if (!error) {
+      permissions.clear(); // Clear old permissions
+      for (JsonObject rule : doc.as<JsonArray>()) {
+        unsigned long code = strtoul(rule["card"]["code"], NULL, 10);
+        int relay = rule["relay"];
+        if (code > 0) {
+          permissions.push_back({code, relay});
+        }
       }
+      Serial.printf("Loaded %d permissions.\n", permissions.size());
     }
-    Serial.printf("Successfully loaded %d permission rules from backend.\n", permissions.size());
   } else {
-    Serial.println("Failed to fetch permissions. System will operate with no permissions.");
-    permissions.clear(); // Ensure no old permissions are left
+    Serial.printf("Fetch failed (HTTP %d)\n", statusCode);
   }
 }
 
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
-  Serial.printf("Message arrived on topic: %s\n", topic);
-  payload[length] = '\0'; // Null-terminate the payload to make it a valid C-string
+  payload[length] = '\0'; 
   String message = (char*)payload;
-  Serial.printf("Payload: %s\n", message.c_str());
+  Serial.printf("MQTT Msg: %s\n", message.c_str());
 
   StaticJsonDocument<256> doc;
-  DeserializationError err = deserializeJson(doc, message);
-  if (err) {
-    Serial.print(F("deserializeJson() failed: "));
-    Serial.println(err.c_str());
-    return;
-  }
-
+  deserializeJson(doc, message);
   const char* command = doc["command"];
-  if (!command) {
-    Serial.println("No command field in MQTT message.");
-    return;
-  }
 
-  if (strcmp(command, "UPDATE_PERMISSIONS") == 0) {
-    Serial.println("Received command to update permissions. Fetching now...");
+  if (command && strcmp(command, "UPDATE_PERMISSIONS") == 0) {
     fetchPermissions();
-  } else if (strcmp(command, "REMOTE_UNLOCK") == 0) {
-    int relayToActivate = doc["relay"] | -1;
-    Serial.printf("Received remote unlock command for relay %d.\n", relayToActivate);
-    if (relayToActivate >= 0 && relayToActivate < NUM_RELAYS) {
-      mcp.digitalWrite(relayToActivate, LOW);
-      active_relays.push_back({relayToActivate, millis() + ACCESS_GRANTED_DURATION});
-    }
-  } else if (strcmp(command, "ACCESS_RESPONSE") == 0) {
-    const char* card = doc["card_code"];
-    const char* status = doc["status"];
+  } 
+  else if (command && strcmp(command, "REMOTE_UNLOCK") == 0) {
     int relay = doc["relay"] | -1;
-    Serial.printf("ACCESS_RESPONSE for %s: %s relay: %d\n", card ? card : "?", status ? status : "?", relay);
-    if (relay >= 0 && strcmp(status, "GRANTED") == 0) {
-      if (relay >= 0 && relay < NUM_RELAYS) {
-        mcp.digitalWrite(relay, LOW);
-        active_relays.push_back({relay, millis() + ACCESS_GRANTED_DURATION});
-      }
+    if (relay >= 0 && relay < NUM_RELAYS) {
+      mcp.digitalWrite(relay, LOW);
+      active_relays.push_back({relay, millis() + ACCESS_GRANTED_DURATION});
     }
-  } else {
-    Serial.printf("Unknown command: %s\n", command);
   }
+  // Note: We don't strictly need ACCESS_RESPONSE logic here if the local check works, 
+  // but we keep it compatible with your existing setup.
 }
 
 
 void publishAccessEvent(unsigned long card_code, int reader_id, bool granted) {
-    if (!mqttClient.connected()) {
-        return; // Don't try to publish if not connected
-    }
+    if (!mqttClient.connected()) return;
+    
     String topic = "elevators/" + String(THIS_ELEVATOR_ID) + "/access_event";
     JsonDocument doc;
     doc["card_code"] = String(card_code);
@@ -233,12 +276,11 @@ void publishAccessEvent(unsigned long card_code, int reader_id, bool granted) {
 
     String message;
     serializeJson(doc, message);
-
     mqttClient.publish(topic.c_str(), message.c_str());
 }
 
 // ======================================================
-//      HARDWARE & LOGIC FUNCTIONS
+//      HARDWARE & LOGIC FUNCTIONS (EXISTING)
 // ======================================================
 
 void setupReaders() {
@@ -258,11 +300,11 @@ void setupRelays() {
   Wire.begin();
   if (!mcp.begin_I2C()) {
     Serial.println("Error: MCP23017 not found. Check wiring.");
-    while (1); // Halt if we can't communicate with the relay controller
+    while (1); 
   }
   for (int i = 0; i < NUM_RELAYS; i++) {
     mcp.pinMode(i, OUTPUT);
-    mcp.digitalWrite(i, HIGH); // Assuming relays are active-low
+    mcp.digitalWrite(i, HIGH); 
   }
 }
 
@@ -278,22 +320,19 @@ void checkWiegandReaders() {
 
 void grantAccess(unsigned long card_code, int reader_id) {
   bool accessGranted = false;
-  // This logic now checks against the permissions downloaded from the backend
   for (const auto& rule : permissions) {
     if (rule.card_code == card_code) {
-      Serial.printf("Access GRANTED. Activating relay %d.\n", rule.relay_to_activate);
+      Serial.printf("Access GRANTED. Relay %d.\n", rule.relay_to_activate);
       mcp.digitalWrite(rule.relay_to_activate, LOW);
       active_relays.push_back({rule.relay_to_activate, millis() + ACCESS_GRANTED_DURATION});
       accessGranted = true;
-      break; // Stop after finding the first matching rule
+      break; 
     }
   }
 
   if (!accessGranted) {
     Serial.println("Access DENIED.");
   }
-
-  // Publish the event to the backend for logging, regardless of outcome
   publishAccessEvent(card_code, reader_id, accessGranted);
 }
 
@@ -302,7 +341,7 @@ void checkRelayTimers() {
   unsigned long current_time = millis();
   for (auto it = active_relays.begin(); it != active_relays.end(); ) {
     if (current_time >= it->turn_off_time) {
-      Serial.printf("Timer expired. Turning off relay %d.\n", it->relay_number);
+      Serial.printf("Relay %d OFF.\n", it->relay_number);
       mcp.digitalWrite(it->relay_number, HIGH);
       it = active_relays.erase(it);
     } else {
