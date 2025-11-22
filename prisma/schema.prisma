@@ -37,8 +37,12 @@ model Elevator {
   location  String
   latitude  Float?
   longitude Float?
-  createdAt DateTime @default(now())
+  
+  // NEW FIELDS
+  currentStatus String   @default("IDLE") // e.g., "DOOR_OPEN", "MOVING_UP", "FAULT_H1"
+  lastHeartbeat DateTime @default(now())
 
+  createdAt DateTime @default(now())
   permissions Permission[]
 }
 

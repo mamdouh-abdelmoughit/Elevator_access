@@ -1,9 +1,28 @@
 import prisma from '../../db/prismaClient.js';
+import { publish } from '../../services/mqttService.js';
+
 
 export async function createElevator(req, res) {
     try {
-        const { name, location } = req.body;
-        const newElevator = await prisma.elevator.create({ data: { name, location } });
+        // 1. Extract latitude and longitude from the body
+        const { name, location, latitude, longitude } = req.body;
+
+        // 2. Validate
+        if (!name || !location) {
+            return res.status(400).json({ error: "Name and Location description are required." });
+        }
+
+        // 3. Save to Database
+        const newElevator = await prisma.elevator.create({ 
+            data: { 
+                name, 
+                location, 
+                latitude: latitude ? parseFloat(latitude) : null,
+                longitude: longitude ? parseFloat(longitude) : null
+            } 
+        });
+        
+        console.log(`New Elevator Created: ${name} at [${latitude}, ${longitude}]`);
         res.status(201).json(newElevator);
     } catch (error) {
         console.error("Error creating elevator:", error); 
@@ -60,6 +79,46 @@ export const getElevatorById = async (req, res) => {
         res.status(500).json({ error: 'Could not fetch elevator.' });
     }
 };
+// Get ALL elevators (for the map)
+export async function getAllElevators(req, res) {
+    try {
+        const elevators = await prisma.elevator.findMany({
+            where: {
+                latitude: { not: null },
+                longitude: { not: null }
+            }
+        });
+        res.json(elevators);
+    } catch (error) {
+        console.error("Error fetching elevators:", error);
+        res.status(500).json({ error: 'Could not fetch elevators.' });
+    }
+}
+export async function sendCommand(req, res) {
+    try {
+        const elevatorId = parseInt(req.params.id);
+        const { commandType } = req.body; // e.g. "OPEN_DOOR", "SHUTDOWN"
+
+        if (!commandType) return res.status(400).json({ error: "Command required" });
+
+        // MQTT Topic: elevators/1/commands
+        const topic = `elevators/${elevatorId}/commands`;
+        
+        // Payload expected by ESP32
+        const message = JSON.stringify({
+            command: "REMOTE_CONTROL",
+            action: commandType
+        });
+
+        publish(topic, message);
+        console.log(`Command ${commandType} sent to Elevator ${elevatorId}`);
+
+        res.json({ message: "Command sent successfully" });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: "Failed to send command" });
+    }
+}
 
 // --- HELPER FUNCTION (Haversine formula to calculate distance) ---
 function calculateDistance(lat1, lon1, lat2, lon2) {
