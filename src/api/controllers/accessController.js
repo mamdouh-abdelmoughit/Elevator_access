@@ -6,94 +6,114 @@ import { createLog } from '../../services/logService.js';
 
 // --- FUNCTION 1: Handles regular card swipes ---
 export const handleAccessEvent = async (elevatorId, cardCode) => {
-    const cardCodeString = cardCode.toString();
-    console.log(`Processing access request for Card [${cardCodeString}] at Elevator [${elevatorId}]`);
+  const cardCodeString = cardCode.toString();
+  console.log(`Processing access request for Card [${cardCodeString}] at Elevator [${elevatorId}]`);
 
-    try {
-        // Find a permission that matches the card code AND the elevator ID
-        // The variable is now declared INSIDE the try block.
-        const permission = await prisma.permission.findFirst({
-            where: {
-                elevatorId: elevatorId,
-                card: {
-                    code: cardCode
-                }
-            }
-        });
+  try {
+    // 1) Find the card record first (explicit, clear)
+    const card = await prisma.card.findUnique({
+      where: { code: cardCodeString } // <<-- use the string code
+    });
 
-        const responseTopic = `elevators/${elevatorId}/access_response`;
-        let responseMessage;
+    // If no card found, deny immediately and log the attempt
+    if (!card) {
+      console.log(`Access DENIED. Unknown card [${cardCodeString}].`);
+      createLog("ACCESS_ATTEMPT", {
+        cardCode: cardCodeString,
+        elevatorId,
+        status: "DENIED",
+        reason: "UNKNOWN_CARD"
+      });
 
-        if (permission) {
-            // Access Granted!
-            console.log(`Access GRANTED. Found permission rule. Relay: ${permission.relay}`);
-            responseMessage = JSON.stringify({
-                status: "GRANTED",
-                card_code: cardCodeString,
-                relay: permission.relay
-            });
-            createLog("ACCESS_ATTEMPT", {
-                cardCode: cardCodeString,
-                elevatorId,
-                status: "GRANTED",
-                relayActivated: permission.relay
-            });
-        } else {
-            // Access Denied!
-            console.log(`Access DENIED. No permission rule found for card [${cardCodeString}].`);
-            responseMessage = JSON.stringify({
-                status: "DENIED",
-                card_code: cardCodeString
-            });
-            createLog("ACCESS_ATTEMPT", {
-                cardCode: cardCodeString,
-                elevatorId,
-                status: "DENIED"
-            });
-        }
-
-        // Publish the response back to the ESP32
-        publish(responseTopic, responseMessage);
-
-    } catch (error) {
-        // This block now handles any failure during the database query
-        console.error("Error processing access event:", error);
-        createLog("ACCESS_FAILURE", {
-            cardCode: cardCodeString,
-            elevatorId,
-            error: "Database query failed."
-        });
+      // Publish DENIED back to device (use commands topic so device subscribed receives it)
+      const denyTopic = `elevators/${elevatorId}/commands`;
+      publish(denyTopic, JSON.stringify({
+        command: 'ACCESS_RESPONSE',
+        status: 'DENIED',
+        card_code: cardCodeString
+      }));
+      return;
     }
-};
 
+    // 2) Card exists — check permission records using card.id
+    const permission = await prisma.permission.findFirst({
+      where: {
+        elevatorId: elevatorId,
+        cardId: card.id
+      }
+    });
+
+    // 3) Build response and log
+    const responseTopic = `elevators/${elevatorId}/commands`; // publish on commands (device listens here)
+    if (permission) {
+      console.log(`Access GRANTED for card ${cardCodeString}. Relay: ${permission.relay}`);
+      createLog("ACCESS_ATTEMPT", {
+        cardCode: cardCodeString,
+        elevatorId,
+        status: "GRANTED",
+        relayActivated: permission.relay
+      });
+
+      const msg = {
+        command: 'ACCESS_RESPONSE',
+        status: 'GRANTED',
+        card_code: cardCodeString,
+        relay: permission.relay
+      };
+      publish(responseTopic, JSON.stringify(msg));
+    } else {
+      console.log(`Access DENIED. Card ${cardCodeString} has no permission for elevator ${elevatorId}.`);
+      createLog("ACCESS_ATTEMPT", {
+        cardCode: cardCodeString,
+        elevatorId,
+        status: "DENIED",
+        reason: "NO_PERMISSION"
+      });
+
+      const msg = {
+        command: 'ACCESS_RESPONSE',
+        status: 'DENIED',
+        card_code: cardCodeString
+      };
+      publish(responseTopic, JSON.stringify(msg));
+    }
+  } catch (error) {
+    console.error("Error processing access event:", error);
+    createLog("ACCESS_FAILURE", {
+      cardCode: cardCodeString,
+      elevatorId,
+      error: error.message || 'unknown'
+    });
+  }
+};
 
 // --- FUNCTION 2: Handles enrollment events ---
 export const handleEnrollmentEvent = async (elevatorId, newCardCode) => {
-    const newCardCodeString = newCardCode.toString();
-    const state = getEnrollmentState(elevatorId);
-    if (!state) {
-        console.log(`ENROLLMENT: Ignoring event. Elevator ${elevatorId} was not in enrollment mode.`);
-        return;
-    }
-    const { userId } = state;
+  const newCardCodeString = newCardCode.toString();
+  const state = getEnrollmentState(elevatorId);
+  if (!state) {
+    console.log(`ENROLLMENT: Ignoring event. Elevator ${elevatorId} was not in enrollment mode.`);
+    return;
+  }
+  const { userId } = state;
 
-    try {
-        await prisma.card.create({ data: { code: newCardCode, userId: userId } });
-        console.log(`SUCCESS: Card ${newCardCodeString} created and assigned to User ${userId}.`);
-        createLog("ENROLLMENT_SUCCESS", {
-            cardCode: newCardCodeString,
-            assignedToUserId: userId,
-            enrolledAtElevatorId: elevatorId
-        });
-        const topic = 'elevators/all/commands';
-        const message = JSON.stringify({ command: "UPDATE_PERMISSIONS" });
-        publish(topic, message);
-    } catch (error) {
-        console.error("ENROLLMENT FAILED:", error);
-        createLog("ENROLLMENT_FAILURE", {
-            cardCode: newCardCodeString,
-            attemptedForUserId: userId,
-            error: error.message
-        });
-    }
+  try {
+    await prisma.card.create({ data: { code: newCardCodeString, userId: userId } });
+    console.log(`SUCCESS: Card ${newCardCodeString} created and assigned to User ${userId}.`);
+    createLog("ENROLLMENT_SUCCESS", {
+      cardCode: newCardCodeString,
+      assignedToUserId: userId,
+      enrolledAtElevatorId: elevatorId
+    });
+    const topic = 'elevators/all/commands';
+    const message = JSON.stringify({ command: "UPDATE_PERMISSIONS" });
+    publish(topic, message);
+  } catch (error) {
+    console.error("ENROLLMENT FAILED:", error);
+    createLog("ENROLLMENT_FAILURE", {
+      cardCode: newCardCodeString,
+      attemptedForUserId: userId,
+      error: error.message
+    });
+  }
 };

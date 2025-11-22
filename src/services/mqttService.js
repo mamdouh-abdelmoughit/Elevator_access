@@ -1,40 +1,55 @@
 // src/services/mqttService.js
 import mqtt from 'mqtt';
-import appEmitter from '../events/appEmitter.js'; // Import our new event emitter
+import appEmitter from '../events/appEmitter.js';
 
-const MQTT_BROKER_URL = 'wss://broker.hivemq.com:8884/mqtt';
-const client = mqtt.connect(MQTT_BROKER_URL, {});
+const MQTT_BROKER = process.env.MQTT_BROKER_URL || 'mqtt://broker.hivemq.com:1883';
+let client = null;
 
-const TOPIC_ACCESS_EVENTS = 'elevators/+/access_event';
-const TOPIC_ENROLLMENT_EVENTS = 'elevators/+/enrollment_event';
+export function connect() {
+  return new Promise((resolve, reject) => {
+    client = mqtt.connect(MQTT_BROKER);
 
-const connect = () => {
     client.on('connect', () => {
-        console.log('MQTT Client connected to broker!');
-        client.subscribe(TOPIC_ACCESS_EVENTS, () => console.log(`Subscribed to: ${TOPIC_ACCESS_EVENTS}`));
-        client.subscribe(TOPIC_ENROLLMENT_EVENTS, () => console.log(`Subscribed to: ${TOPIC_ENROLLMENT_EVENTS}`));
+      console.log('MQTT connected to', MQTT_BROKER);
+      // subscribe to elevator topics
+      client.subscribe('elevators/+/access_event', (err) => {
+        if (err) console.error('MQTT subscribe error', err);
+      });
+      client.subscribe('elevators/+/enrollment_event', (err) => {
+        if (err) console.error('MQTT subscribe error', err);
+      });
+      client.subscribe('elevators/+/commands', (err) => {
+        if (err) console.error('MQTT subscribe error', err);
+      });
+      resolve();
     });
 
-    client.on('message', (topic, message) => {
-        const topicParts = topic.split('/');
-        const eventType = topicParts[2]; // 'access_event' or 'enrollment_event'
-
-        // Emit a generic 'mqttMessage' event that our app can listen for.
-        // We pass all the necessary info in the payload.
-        appEmitter.emit('mqttMessage', {
-            eventType: eventType,
-            topic: topic,
-            payload: message.toString()
-        });
+    client.on('message', (topic, messageBuffer) => {
+      const payload = messageBuffer.toString();
+      // Emit into the app's event bus for centralized processing
+      appEmitter.emit('mqttMessage', { topic, payload });
     });
 
-    client.on('error', (error) => console.error('MQTT Client Error:', error));
-    client.on('close', () => console.log('MQTT Client disconnected.'));
-};
+    client.on('error', (err) => {
+      console.error('MQTT error', err);
+    });
 
-const publish = (topic, message) => {
-    console.log(`Publishing to topic: ${topic}`);
-    client.publish(topic, message);
-};
+    client.on('reconnect', () => {
+      console.log('MQTT reconnecting...');
+    });
 
-export { connect, publish };
+    client.on('offline', () => {
+      console.warn('MQTT offline');
+    });
+  });
+}
+
+export function publish(topic, message) {
+  if (!client || !client.connected) {
+    console.warn('MQTT client not connected — cannot publish', topic);
+    return;
+  }
+  client.publish(topic, message, { qos: 0 }, (err) => {
+    if (err) console.error('MQTT publish error', err);
+  });
+}
