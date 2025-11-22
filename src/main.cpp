@@ -180,22 +180,46 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   String message = (char*)payload;
   Serial.printf("Payload: %s\n", message.c_str());
 
-  JsonDocument doc;
-  deserializeJson(doc, message);
-  const char* command = doc["command"];
+  StaticJsonDocument<256> doc;
+  DeserializationError err = deserializeJson(doc, message);
+  if (err) {
+    Serial.print(F("deserializeJson() failed: "));
+    Serial.println(err.c_str());
+    return;
+  }
 
-  if (command) { // Check if the "command" key exists
-    if (strcmp(command, "UPDATE_PERMISSIONS") == 0) {
-      Serial.println("Received command to update permissions. Fetching now...");
-      fetchPermissions();
-    } else if (strcmp(command, "REMOTE_UNLOCK") == 0) {
-      int relayToActivate = doc["relay"];
-      Serial.printf("Received remote unlock command for relay %d.\n", relayToActivate);
+  const char* command = doc["command"];
+  if (!command) {
+    Serial.println("No command field in MQTT message.");
+    return;
+  }
+
+  if (strcmp(command, "UPDATE_PERMISSIONS") == 0) {
+    Serial.println("Received command to update permissions. Fetching now...");
+    fetchPermissions();
+  } else if (strcmp(command, "REMOTE_UNLOCK") == 0) {
+    int relayToActivate = doc["relay"] | -1;
+    Serial.printf("Received remote unlock command for relay %d.\n", relayToActivate);
+    if (relayToActivate >= 0 && relayToActivate < NUM_RELAYS) {
       mcp.digitalWrite(relayToActivate, LOW);
       active_relays.push_back({relayToActivate, millis() + ACCESS_GRANTED_DURATION});
     }
+  } else if (strcmp(command, "ACCESS_RESPONSE") == 0) {
+    const char* card = doc["card_code"];
+    const char* status = doc["status"];
+    int relay = doc["relay"] | -1;
+    Serial.printf("ACCESS_RESPONSE for %s: %s relay: %d\n", card ? card : "?", status ? status : "?", relay);
+    if (relay >= 0 && strcmp(status, "GRANTED") == 0) {
+      if (relay >= 0 && relay < NUM_RELAYS) {
+        mcp.digitalWrite(relay, LOW);
+        active_relays.push_back({relay, millis() + ACCESS_GRANTED_DURATION});
+      }
+    }
+  } else {
+    Serial.printf("Unknown command: %s\n", command);
   }
 }
+
 
 void publishAccessEvent(unsigned long card_code, int reader_id, bool granted) {
     if (!mqttClient.connected()) {
