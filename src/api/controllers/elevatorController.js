@@ -5,7 +5,7 @@ import { publish } from '../../services/mqttService.js';
 export async function createElevator(req, res) {
     try {
         // 1. Extract latitude and longitude from the body
-        const { name, location, latitude, longitude } = req.body;
+        const { name, location, latitude, longitude, macAddress} = req.body;
 
         // 2. Validate
         if (!name || !location) {
@@ -18,7 +18,8 @@ export async function createElevator(req, res) {
                 name, 
                 location, 
                 latitude: latitude ? parseFloat(latitude) : null,
-                longitude: longitude ? parseFloat(longitude) : null
+                longitude: longitude ? parseFloat(longitude) : null,
+                macAddress: macAddress
             } 
         });
         
@@ -117,6 +118,28 @@ export async function sendCommand(req, res) {
     } catch (error) {
         console.error(error);
         res.status(500).json({ error: "Failed to send command" });
+    }
+}
+// Get Elevator Config by MAC Address
+export async function identifyElevator(req, res) {
+    try {
+        const { mac } = req.query; // Expecting ?mac=A1:B2...
+        
+        if (!mac) return res.status(400).json({ error: "MAC address required" });
+
+        const elevator = await prisma.elevator.findUnique({
+            where: { macAddress: mac }
+        });
+
+        if (!elevator) {
+            return res.status(404).json({ error: "Elevator not registered" });
+        }
+
+        // Return the ID so the ESP32 knows which MQTT topic to use
+        res.json({ id: elevator.id, name: elevator.name });
+    } catch (error) {
+        console.error("Identify error:", error);
+        res.status(500).json({ error: "Server error" });
     }
 }
 

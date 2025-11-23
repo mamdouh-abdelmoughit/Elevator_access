@@ -41,7 +41,7 @@ model Elevator {
   // NEW FIELDS
   currentStatus String   @default("IDLE") // e.g., "DOOR_OPEN", "MOVING_UP", "FAULT_H1"
   lastHeartbeat DateTime @default(now())
-
+  macAddress String?   @unique 
   createdAt DateTime @default(now())
   permissions Permission[]
 }
