@@ -47,7 +47,8 @@ export default function AddElevatorScreen({ navigation }) {
           name: name,
           location: locationDesc,
           latitude: selectedCoord.latitude,
-          longitude: selectedCoord.longitude
+          longitude: selectedCoord.longitude,
+          macAddress: mac
         })
       });
 
@@ -119,6 +120,14 @@ export default function AddElevatorScreen({ navigation }) {
               placeholder="e.g. Rue 12, Maarif, Imm. 4, 2nd Floor"
               value={locationDesc}
               onChangeText={setLocationDesc}
+            />
+            <Text style={styles.label}>Device MAC Address (e.g. A1:B2:C3...):</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="XX:XX:XX:XX:XX:XX"
+              value={mac}
+              onChangeText={setMac}
+              autoCapitalize="characters"
             />
 
             <View style={styles.buttonRow}>
