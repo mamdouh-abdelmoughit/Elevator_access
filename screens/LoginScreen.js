@@ -31,6 +31,13 @@ const handleLogin = async () => {
   } catch (error) {
     Alert.alert(t('errorTitle'), t('networkError'));
   }
+    // Inside handleLogin, after getting response:
+  if (data.user.role !== 'MANAGER') {
+      Alert.alert("Error", "This app is for Residence Managers only.");
+      return;
+  }
+  // If OK, navigate to Dashboard
+  navigation.replace('Dashboard', { user: data.user });
 };
 
 

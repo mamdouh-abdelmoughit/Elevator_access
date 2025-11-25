@@ -2,9 +2,7 @@
 import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import MapScreen from './screens/MapScreen'; 
-import AddElevatorScreen from './screens/AddElevatorScreen';
-import ElevatorDetailScreen from './screens/ElevatorDetailScreen';
+
 import * as TaskManager from 'expo-task-manager';
 import * as Location from 'expo-location';
 import * as SecureStore from 'expo-secure-store'; // <-- IMPORT
@@ -14,10 +12,11 @@ import './i18n';
 import LoginScreen from './screens/LoginScreen';
 import HomeScreen from './screens/HomeScreen';
 import SignupScreen from './screens/SignupScreen';
+import DashboardScreen from './screens/DashboardScreen'; // Was SyndicScreen
 
-const LOCATION_TASK_NAME = 'background-location-task';
+//const LOCATION_TASK_NAME = 'background-location-task';
 // Use your backend address (same as other screens). If you run backend on device/emulator, adjust accordingly.
-const API_URL = 'http://192.168.0.193:3000';
+//const API_URL = 'http://192.168.11.251:3000';
 
 // Background task definition.
 // This task runs even when the app is backgrounded (Expo taskManager + location set up required).
@@ -98,12 +97,10 @@ export default function App() {
   return (
     <NavigationContainer>
       <Stack.Navigator initialRouteName="Login">
-        <Stack.Screen name="Map" component={MapScreen} options={{ title: 'Technician Map' }} />
         <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
         <Stack.Screen name="Signup" component={SignupScreen} options={{ title: 'Create Account' }} />
         <Stack.Screen name="Home" component={HomeScreen} options={{ title: 'Elevator Dashboard' }} />
-        <Stack.Screen name="AddElevator" component={AddElevatorScreen} options={{ title: 'Install New Elevator' }} />
-        <Stack.Screen name="ElevatorDetail" component={ElevatorDetailScreen} options={{ title: 'Tableau de Bord' }} />
+        <Stack.Screen name="Dashboard" component={DashboardScreen} options={{ title: 'My Residence' }} />
       </Stack.Navigator>
     </NavigationContainer>
   );
