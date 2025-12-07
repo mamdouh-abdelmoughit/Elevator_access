@@ -12,51 +12,86 @@ model User {
   phone             String   @unique
   name              String
   password          String
-  role              String   @default("EMPLOYEE")
+  role              String   @default("EMPLOYEE") // Roles: ADMIN, EMPLOYEE, MANAGER (Syndic)
+  
+  // Relations
+  managedElevators  Elevator[] // Elevators this Syndic manages
+  requests          Request[]  // Requests sent by this Syndic
+  
+  // ... keep existing location fields ...
   createdAt         DateTime @default(now())
   latitude          Float?
   longitude         Float?
   locationUpdatedAt DateTime?
-
   cards             Card[]
+}
+
+model Elevator {
+  id            Int      @id @default(autoincrement())
+  name          String
+  location      String
+  
+  // Link to the Syndic
+  managerId     Int?
+  manager       User?    @relation(fields: [managerId], references: [id])
+
+  requests      Request[] // Requests related to this elevator
+
+  // ... keep existing fields ...
+  latitude      Float?
+  longitude     Float?
+  currentStatus String   @default("IDLE")
+  lastHeartbeat DateTime @default(now())
+  macAddress    String?  @unique
+  createdAt     DateTime @default(now())
+  permissions   Permission[]
 }
 
 model Card {
   id        Int      @id @default(autoincrement())
   code      String   @unique
+  
+  // NEW: Who owns this card? (e.g. "Mr. Idrissi - Apt 4")
+  label     String?  
+
   userId    Int?
   user      User?    @relation(fields: [userId], references: [id])
   createdAt DateTime @default(now())
-
   permissions Permission[]
 }
 
-model Elevator {
-  id        Int      @id @default(autoincrement())
-  name      String
-  location  String
-  latitude  Float?
-  longitude Float?
+// NEW MODEL: The Communication Ticket
+model Request {
+  id          Int      @id @default(autoincrement())
   
-  // NEW FIELDS
-  currentStatus String   @default("IDLE") // e.g., "DOOR_OPEN", "MOVING_UP", "FAULT_H1"
-  lastHeartbeat DateTime @default(now())
-  macAddress String?   @unique 
-  createdAt DateTime @default(now())
-  permissions Permission[]
+  // Who asked?
+  syndicId    Int
+  syndic      User     @relation(fields: [syndicId], references: [id])
+
+  // Which elevator?
+  elevatorId  Int
+  elevator    Elevator @relation(fields: [elevatorId], references: [id])
+
+  // What do they want?
+  type        String   // "BLOCK", "ACTIVATE", "NEW_CARD", "LOST_CARD"
+  residentName String  // e.g. "Mr Idrissi - Apt 4"
+  notes       String?  // Optional details
+
+  // Request Status
+  status      String   @default("PENDING") // "PENDING", "COMPLETED", "REJECTED"
+  
+  createdAt   DateTime @default(now())
 }
 
+// ... Keep Permission and Log models as they are ...
 model Permission {
   id         Int      @id @default(autoincrement())
   cardId     Int
   elevatorId Int
   relay      Int
-
   card       Card     @relation(fields: [cardId], references: [id])
   elevator   Elevator @relation(fields: [elevatorId], references: [id])
-
   createdAt  DateTime @default(now())
-
   @@unique([cardId, elevatorId, relay])
 }
 

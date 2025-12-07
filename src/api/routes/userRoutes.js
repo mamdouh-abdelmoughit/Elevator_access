@@ -2,11 +2,12 @@
 
 import express from 'express';
 // Add 'updateUserLocation' to this list
-import { getAllUsers, createUser, updateUserLocation, loginUser } from '../controllers/userController.js';
+import { getAllUsers, createUser, updateUserLocation, loginUser, getManagers } from '../controllers/userController.js';
 
 const router = express.Router();
 
 router.get('/', getAllUsers);
+router.get('/managers', getManagers); 
 router.post('/', createUser);
 router.post('/login', loginUser);
 

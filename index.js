@@ -10,6 +10,7 @@ import cardRoutes from './src/api/routes/cardRoutes.js';
 import permissionRoutes from './src/api/routes/permissionRoutes.js';
 import enrollmentRoutes from './src/api/routes/enrollmentRoutes.js';
 import logRoutes from './src/api/routes/logRoutes.js';
+import requestRoutes from './src/api/routes/requestRoutes.js';
 
 import { connect as mqttConnect } from './src/services/mqttService.js';
 import { initializeEventListeners } from './src/events/eventListeners.js';
@@ -34,6 +35,7 @@ app.use('/permissions', auth, permissionRoutes);
 app.use('/elevators', auth, elevatorRoutes); // elevatorRoutes should check roles for some endpoints
 app.use('/enrollment', auth, enrollmentRoutes);
 app.use('/logs', auth, logRoutes);
+app.use('/requests', auth, requestRoutes); 
 
 // Generic error handler
 app.use((err, req, res, next) => {

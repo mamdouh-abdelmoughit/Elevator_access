@@ -142,6 +142,40 @@ export async function identifyElevator(req, res) {
         res.status(500).json({ error: "Server error" });
     }
 }
+// Assign a Manager (Syndic) to an Elevator
+export async function assignManager(req, res) {
+    try {
+        const elevatorId = parseInt(req.params.id);
+        const { userId } = req.body; // The ID of the Syndic (User)
+
+        const updated = await prisma.elevator.update({
+            where: { id: elevatorId },
+            data: { managerId: parseInt(userId) }
+        });
+        res.json({ message: "Manager assigned successfully", elevator: updated });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: "Failed to assign manager" });
+    }
+}
+// Get elevators managed by the current user (Syndic)
+export async function getMyElevators(req, res) {
+    try {
+        const syndicId = req.user.id; // Extracted from JWT Token
+
+        const elevators = await prisma.elevator.findMany({
+            where: { 
+                managerId: parseInt(syndicId) 
+            }
+        });
+        
+        console.log(`Found ${elevators.length} elevators for Manager ${syndicId}`);
+        res.json(elevators);
+    } catch (error) {
+        console.error("Error fetching my elevators:", error);
+        res.status(500).json({ error: 'Could not fetch elevators.' });
+    }
+}
 
 // --- HELPER FUNCTION (Haversine formula to calculate distance) ---
 function calculateDistance(lat1, lon1, lat2, lon2) {

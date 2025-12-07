@@ -45,7 +45,9 @@ export const loginUser = async (req, res) => {
 
 export const createUser = async (req, res) => {
   try {
-    const { name, phone, password } = req.body;
+    // 1. Extract 'role' along with other fields
+    const { name, phone, password, role } = req.body;
+
     if (!name || !phone || !password) {
       return res.status(400).json({ error: "Name, phone, and password are required." });
     }
@@ -53,18 +55,33 @@ export const createUser = async (req, res) => {
       return res.status(400).json({ error: "Password must be at least 6 characters long." });
     }
 
-    // Determine role (pilot rule) - phone '0661418895' becomes ADMIN
-    const userRole = (phone === '0661418895') ? 'ADMIN' : 'EMPLOYEE';
+    // 2. Determine the Role Logic
+    let assignedRole = 'EMPLOYEE'; // Default role
 
+    // SECURITY: The specific phone number is ALWAYS Admin
+    if (phone === '0661418895') {
+        assignedRole = 'ADMIN';
+    } 
+    // If the Frontend specifically asked for 'MANAGER' (Syndic App), grant it
+    else if (role === 'MANAGER') {
+        assignedRole = 'MANAGER';
+    }
+    // If the Frontend specifically asked for 'EMPLOYEE', grant it
+    else if (role === 'EMPLOYEE') {
+        assignedRole = 'EMPLOYEE';
+    }
+
+    // 3. Hash Password
     const saltRounds = 10;
     const hashedPassword = await bcrypt.hash(password, saltRounds);
 
+    // 4. Create in Database
     const newUser = await prisma.user.create({
       data: {
         name,
         phone,
         password: hashedPassword,
-        role: userRole,
+        role: assignedRole, // <--- Uses the calculated role
       },
     });
 
@@ -76,7 +93,6 @@ export const createUser = async (req, res) => {
     res.status(500).json({ error: 'Could not create user. Is the phone number unique?' });
   }
 };
-
 export const updateUserLocation = async (req, res) => {
   try {
     const userId = parseInt(req.params.id);
@@ -104,5 +120,17 @@ export const updateUserLocation = async (req, res) => {
   } catch (error) {
     console.error("Error updating user location:", error);
     res.status(500).json({ error: 'Could not update user location.' });
+  }
+};
+// Fetch only users with role 'MANAGER'
+export async function getManagers(req, res) {
+  try {
+    const managers = await prisma.user.findMany({
+      where: { role: 'MANAGER' },
+      select: { id: true, name: true, phone: true } // Don't send passwords
+    });
+    res.json(managers);
+  } catch (error) {
+    res.status(500).json({ error: 'Could not fetch managers' });
   }
 };
