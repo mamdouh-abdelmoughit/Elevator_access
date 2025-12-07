@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { 
   View, Text, StyleSheet, FlatList, Alert, 
-  Button, RefreshControl 
+  Button, RefreshControl, TouchableOpacity,
 } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL;
 
-export default function AdminInboxScreen() {
+export default function AdminInboxScreen({ navigation }) {
   const [requests, setRequests] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -65,6 +65,17 @@ export default function AdminInboxScreen() {
       <Text style={styles.mainText}>
         <Text style={{fontWeight: 'bold'}}>Building:</Text> {item.elevator.name}
       </Text>
+      {/* ADD THIS BUTTON HERE */}
+      <TouchableOpacity 
+        style={styles.manageBtn}
+        onPress={() => navigation.navigate('BuildingAccess', { 
+            elevatorId: item.elevatorId, 
+            elevatorName: item.elevator.name 
+        })}
+      >
+        <Text style={{color:'white', textAlign:'center'}}>🔑 Manage Access for this Building</Text>
+      </TouchableOpacity>
+      {/* ------------------ */}
       <Text style={styles.resident}>
         Target: {item.residentName}
       </Text>
@@ -117,5 +128,11 @@ const styles = StyleSheet.create({
   resident: { fontSize: 18, fontWeight: 'bold', marginVertical: 8, color: '#2c3e50' },
   noteBox: { backgroundColor: '#f9f9f9', padding: 8, borderRadius: 4, marginBottom: 10 },
   actionRow: { flexDirection: 'row', justifyContent: 'space-around', marginTop: 10 },
-  empty: { textAlign: 'center', marginTop: 50, color: 'gray', fontSize: 16 }
+  empty: { textAlign: 'center', marginTop: 50, color: 'gray', fontSize: 16 },
+  manageBtn: {
+      backgroundColor: '#34495e',
+      padding: 10,
+      borderRadius: 5,
+      marginVertical: 10,
+  }
 });
