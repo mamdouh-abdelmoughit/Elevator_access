@@ -89,6 +89,7 @@ model Permission {
   cardId     Int
   elevatorId Int
   relay      Int
+  isActive   Boolean  @default(true)  // <--- ADD THIS
   card       Card     @relation(fields: [cardId], references: [id])
   elevator   Elevator @relation(fields: [elevatorId], references: [id])
   createdAt  DateTime @default(now())

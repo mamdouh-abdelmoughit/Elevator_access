@@ -3,11 +3,11 @@ import prisma from '../../db/prismaClient.js';
 
 export async function createCard(req, res) {
   try {
-    const { code, userId } = req.body;
+    const { code, label,userId } = req.body;
     if (!code) return res.status(400).json({ error: 'code is required' });
 
     const newCard = await prisma.card.create({
-      data: { code: code.toString(), userId: userId ? Number(userId) : null }
+      data: { code: code.toString(), userId: userId ? Number(userId) : null, label: label || null}
     });
 
     res.status(201).json(newCard);
