@@ -12,6 +12,8 @@ export default function LoginScreen({ navigation }) {
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
 
+// front-syndic/screens/LoginScreen.js
+
 const handleLogin = async () => {
   try {
     const response = await fetch(`${API_URL}/users/login`, {
@@ -20,26 +22,28 @@ const handleLogin = async () => {
       body: JSON.stringify({ phone, password }),
     });
     const data = await response.json();
+
     if (response.ok) {
-      // data = { token, user }
+      // 1. Save Token
       await SecureStore.setItemAsync('authToken', data.token);
       await SecureStore.setItemAsync('currentUser', JSON.stringify(data.user));
-      navigation.replace('Home', { user: data.user });
+
+      // 2. CHECK ROLE AND NAVIGATE CORRECTLY
+      if (data.user.role === 'MANAGER') {
+          // Send Syndics to the Dashboard
+          navigation.replace('Dashboard', { user: data.user });
+      } else {
+          // Send everyone else (if any) to Home, or block them
+          Alert.alert("Access Denied", "This app is for Syndic Managers only.");
+      }
     } else {
       Alert.alert(t('errorTitle'), data.error || "Login failed");
     }
   } catch (error) {
     Alert.alert(t('errorTitle'), t('networkError'));
+    console.error(error);
   }
-    // Inside handleLogin, after getting response:
-  if (data.user.role !== 'MANAGER') {
-      Alert.alert("Error", "This app is for Residence Managers only.");
-      return;
-  }
-  // If OK, navigate to Dashboard
-  navigation.replace('Dashboard', { user: data.user });
 };
-
 
   return (
     <SafeAreaView style={styles.container}>
