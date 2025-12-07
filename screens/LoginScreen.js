@@ -44,7 +44,7 @@ const handleLogin = async () => {
   return (
     <SafeAreaView style={styles.container}>
         <View style={styles.innerContainer}>
-      <Text style={styles.title}>{t('welcomeBack')}</Text>
+      <Text style={styles.title}>{t('Espace Syndic')}</Text>
       <TextInput style={styles.input} placeholder="Enter phone number" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
       <TextInput style={styles.input} placeholder="Enter password" value={password} onChangeText={setPassword} secureTextEntry />
       <Button title={t('login')} onPress={handleLogin} />
