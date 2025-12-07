@@ -5,6 +5,8 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import MapScreen from './screens/MapScreen'; 
 import AddElevatorScreen from './screens/AddElevatorScreen';
 import ElevatorDetailScreen from './screens/ElevatorDetailScreen';
+import AdminInboxScreen from './screens/AdminInboxScreen';
+import AssignManagerScreen from './screens/AssignManagerScreen';
 import * as TaskManager from 'expo-task-manager';
 import * as Location from 'expo-location';
 import * as SecureStore from 'expo-secure-store'; // <-- IMPORT
@@ -104,6 +106,8 @@ export default function App() {
         <Stack.Screen name="Home" component={HomeScreen} options={{ title: 'Elevator Dashboard' }} />
         <Stack.Screen name="AddElevator" component={AddElevatorScreen} options={{ title: 'Install New Elevator' }} />
         <Stack.Screen name="ElevatorDetail" component={ElevatorDetailScreen} options={{ title: 'Tableau de Bord' }} />
+        <Stack.Screen name="AdminInbox" component={AdminInboxScreen} options={{ title: 'Service Requests' }} />
+        <Stack.Screen name="AssignManager" component={AssignManagerScreen} options={{ title: 'Assign Managers' }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

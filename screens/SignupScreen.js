@@ -17,7 +17,7 @@ export default function SignupScreen({ navigation }) {
       return;
     }
 
-    const userData = { name, phone, password }; // Role is no longer needed here
+    const userData = { name, phone, password, role: 'EMPLOYEE' }; 
 
     try {
       const response = await fetch(`${API_URL}/users`, {

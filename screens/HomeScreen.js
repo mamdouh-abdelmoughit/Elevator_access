@@ -124,6 +124,16 @@ export default function HomeScreen({ route, navigation }) {
             color="green" 
             onPress={() => navigation.navigate('AddElevator')} 
           />
+          <Button 
+            title="📩 Inbox: Check Requests" 
+            color="#d35400" 
+            onPress={() => navigation.navigate('AdminInbox')} 
+          />
+          <Button 
+            title="👥 Assign Syndics to Elevators" 
+            color="#8e44ad" // Purple color
+            onPress={() => navigation.navigate('AssignManager')} 
+          />
         </View>
       )}
 
