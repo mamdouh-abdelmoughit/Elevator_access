@@ -121,22 +121,38 @@ export async function sendCommand(req, res) {
     }
 }
 // Get Elevator Config by MAC Address
+// Get Elevator Config by MAC Address
 export async function identifyElevator(req, res) {
     try {
-        const { mac } = req.query; // Expecting ?mac=A1:B2...
-        
-        if (!mac) return res.status(400).json({ error: "MAC address required" });
+        // --- DEBUG LOGS (Spy on the incoming request) ---
+        console.log("🔍 REQUEST RECEIVED!");
+        console.log("👉 Method:", req.method); // Is it GET or POST?
+        console.log("👉 Query Params:", req.query); // checking ?mac=...
+        console.log("👉 Body Params:", req.body);   // checking JSON body
+        // ------------------------------------------------
+
+        // Check BOTH spots (just in case ESP32 sends it differently)
+        const mac = req.query.mac || req.body.mac; 
+
+        console.log(`🔍 Searching Database for MAC: '${mac}'`);
+
+        if (!mac) {
+            console.log("❌ Error: No MAC provided in request.");
+            return res.status(400).json({ error: "MAC address required" });
+        }
 
         const elevator = await prisma.elevator.findUnique({
             where: { macAddress: mac }
         });
 
         if (!elevator) {
+            console.log("❌ Error: MAC not found in database.");
             return res.status(404).json({ error: "Elevator not registered" });
         }
 
-        // Return the ID so the ESP32 knows which MQTT topic to use
+        console.log("✅ SUCCESS! Found Elevator:", elevator.name);
         res.json({ id: elevator.id, name: elevator.name });
+
     } catch (error) {
         console.error("Identify error:", error);
         res.status(500).json({ error: "Server error" });

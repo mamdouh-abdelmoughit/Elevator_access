@@ -26,13 +26,17 @@ app.use(bodyParser.json({ limit: '2mb' }));
 // Health
 app.get('/health', (req, res) => res.json({ status: 'UP', timestamp: new Date().toISOString() }));
 
+app.use((req, res, next) => {
+    console.log(`📢 LOG: ${req.method} request to: ${req.url}`);
+    next();
+});
 // Public routes
 app.use('/users', userRoutes); // login / signup are under here (public)
 app.use('/cards', cardRoutes); // creating cards may be admin only, but left as-is for now
 
 // Protected routes (require JWT)
-app.use('/permissions', auth, permissionRoutes);
-app.use('/elevators', auth, elevatorRoutes); // elevatorRoutes should check roles for some endpoints
+app.use('/permissions', permissionRoutes);
+app.use('/elevators', elevatorRoutes); // elevatorRoutes should check roles for some endpoints
 app.use('/enrollment', auth, enrollmentRoutes);
 app.use('/logs', auth, logRoutes);
 app.use('/requests', auth, requestRoutes); 

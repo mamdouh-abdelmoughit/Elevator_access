@@ -3,11 +3,14 @@ const router = Router();
 import { createPermission, deletePermission ,getAllPermissionsForAdmin, 
     getPermissionsForDevice, getResidentsForSyndic ,
     togglePermissionStatus} from '../controllers/permissionController.js';
+import auth from '../../middleware/auth.js';
 
+router.get('/elevator/:id', getPermissionsForDevice);
+
+router.use(auth);
 router.post('/', createPermission);
 router.get('/elevator/:id/admin', getAllPermissionsForAdmin);
 router.post('/delete/:id', deletePermission);
-router.get('/elevator/:id', getPermissionsForDevice);
 router.get('/elevator/:id/residents', getResidentsForSyndic); // <--- NEW ROUTE
 router.patch('/:id/status', togglePermissionStatus);
 
