@@ -79,15 +79,38 @@ export default function ElevatorDetailScreen({ route }) {
         <Text style={styles.label}>Panneau de Contrôle (Relais):</Text>
         
         <View style={styles.pickerContainer}>
-            <Picker
-                selectedValue={selectedCommand}
-                onValueChange={(itemValue) => setSelectedCommand(itemValue)}
-            >
-                <Picker.Item label="Ouvrir Porte (Relais 1)" value="OPEN_DOOR" />
-                <Picker.Item label="Fermer Porte (Relais 2)" value="CLOSE_DOOR" />
-                <Picker.Item label="Arrêt d'Urgence (OFF)" value="SHUTDOWN" />
-                <Picker.Item label="Démarrer (ON)" value="START" />
-            </Picker>
+<Picker
+        selectedValue={selectedCommand}
+        onValueChange={(itemValue) => setSelectedCommand(itemValue)}
+    >
+        <Picker.Item label="--- COMMANDES STANDARD ---" value="" enabled={false} />
+        
+        {/* OPEN DOOR */}
+        <Picker.Item label="🟢 Ouvrir Porte (ON)" value="OPEN_DOOR_ON" />
+        <Picker.Item label="🔴 Ouvrir Porte (OFF)" value="OPEN_DOOR_OFF" />
+
+        {/* CLOSE DOOR */}
+        <Picker.Item label="🟢 Fermer Porte (ON)" value="CLOSE_DOOR_ON" />
+        <Picker.Item label="🔴 Fermer Porte (OFF)" value="CLOSE_DOOR_OFF" />
+
+        {/* SHUTDOWN */}
+        <Picker.Item label="🟢 Arrêt Urgence (ON)" value="SHUTDOWN_ON" />
+        <Picker.Item label="🔴 Arrêt Urgence (OFF)" value="SHUTDOWN_OFF" />
+        
+        <Picker.Item label="--- MODE RÉVISION ---" value="" enabled={false} />
+        
+        {/* MODE REVISION */}
+        <Picker.Item label="🟢 Activer Révision (ON)" value="REVISION_MODE_ON" />
+        <Picker.Item label="🔴 Désactiver Révision (OFF)" value="REVISION_MODE_OFF" />
+
+        {/* REV MONTEE */}
+        <Picker.Item label="⬆️ Monter Révision (ON)" value="REV_MONTEE_ON" />
+        <Picker.Item label="🛑 Monter Révision (OFF)" value="REV_MONTEE_OFF" />
+
+        {/* REV DESCENTE */}
+        <Picker.Item label="⬇️ Descendre Révision (ON)" value="REV_DESCENTE_ON" />
+        <Picker.Item label="🛑 Descendre Révision (OFF)" value="REV_DESCENTE_OFF" />
+    </Picker>
         </View>
 
         <Button 
