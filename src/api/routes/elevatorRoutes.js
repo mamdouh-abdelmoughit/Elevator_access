@@ -7,7 +7,7 @@ import auth from '../../middleware/auth.js';
 const router = express.Router();
 
 router.get('/', getAllElevators);
-router.get('/my', getMyElevators);
+router.get('/my', auth, getMyElevators); 
 router.get('/identify', identifyElevator);
 router.get('/:id', getElevatorById);
 

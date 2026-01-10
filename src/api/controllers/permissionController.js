@@ -7,10 +7,13 @@ export async function createPermission(req, res) {
         const newPermission = await prisma.permission.create({
             data: { cardId, elevatorId, relay }
         });
+        const topic = `elevators/${elevatorId}/commands`;
+        publish(topic, JSON.stringify({ command: "UPDATE_PERMISSIONS" }));
+
         res.status(201).json(newPermission);
     } catch (error) {
         console.error(error);
-        res.status(500).json({ error: 'Could not create permission. Is it a duplicate?' });
+        res.status(500).json({ error: 'Could not create permission.' });
     }
 }
 
