@@ -6,60 +6,60 @@
 #include <vector>
 #include <WIEGAND.h>
 #include <Wire.h>
+#include <Adafruit_MCP23X17.h> // Required Library
 
 // ==========================================
 //      USER CONFIGURATION
 // ==========================================
 const char* WIFI_SSID     = "La_Fibre_dOrange_2.4G_B283";      
 const char* WIFI_PASSWORD = "YY93EHUEPFCCQ7QQUK";  
-const char* BACKEND_SERVER = "192.168.11.108";      
+const char* BACKEND_SERVER = "192.168.11.105";      
 const int   BACKEND_PORT   = 3000;
 const char* MQTT_BROKER    = "broker.hivemq.com";
 const int   MQTT_PORT      = 1883;
 
+
+// Reader Instances
+WIEGAND readerF1; // Floor 1
+WIEGAND readerF2; // Floor 2
+WIEGAND readerF3; // Floor 3
+
+const int RELAY_F1 = 20;
+const int RELAY_F2 = 21;
+const int RELAY_F3 = 47;
 // ==========================================
-//      PIN DEFINITIONS (FULL SIMULATION)
+//      PIN DEFINITIONS
 // ==========================================
-// --- INPUTS (SENSORS & SIGNALS) ---
-// Connect these to GND to activate them (Active Low)
-
-// The "Perfect Row" on your board (9 to 14)
-#define PIN_MONTEE        14  // Motion UP
-#define PIN_DESCENTE      13  // Motion DOWN
-#define PIN_GV            12  // Grande Vitesse
-#define PIN_PV            11  // Petite Vitesse
-#define PIN_INSPECTION    10  // Maintenance Mode
-// Sensors moved to the next block
-#define PIN_ML1           48  // Magnetic Sensor 1
-#define PIN_ML2           47  // Magnetic Sensor 2
-#define PIN_IMP_ARRET     45  // Stop Zone Pulse
-#define PIN_IMP_PV        35  // Deceleration Pulse
-#define PIN_EXTREME_HAUT  21  // Top Limit Switch
-#define PIN_EXTREME_BAS   20  // Bottom Limit Switch
-
-// --- GROUP 3: SAFETY & DOORS (New) ---
-#define PIN_SEC_GENERALE  37  // General Safety Chain
-#define PIN_SEC_PORTE     36  // Door Series Safety
-#define PIN_OUVERTURE     38  // Door Opening Signal
-#define PIN_FERMETURE     39  // Door Closing Signal
-#define PIN_PHOTOCELLULE  40  // Light Curtain/Obstacle
-// Sensors moved to the next block
-#define PIN_DOOR_SENSOR   15  // Door State
-#define PIN_FAULT_SIGNAL  16  // Generic Fault
-
-// --- OUTPUTS (RELAYS) ---
-// Keep these if you have them, otherwise move to 46, 3, 8
+// --- ESP32 NATIVE PINS ---
+#define I2C_SDA 11
+#define I2C_SCL 12																			  
 #define RELAY_OPEN_DOOR   6   
 #define RELAY_CLOSE_DOOR  4   
-#define RELAY_SHUTDOWN    5  
-// --- NEW REMOTE COMMAND OUTPUTS ---
-#define RELAY_REV_MODE    9   // Output to toggle Revision Mode
-#define RELAY_REV_UP      46  // Output to simulate Up Button
-#define RELAY_REV_DOWN    3   // Output to simulate Down Button
-// --- READERS ---
-// Using 18 and 17 because you listed them
-#define READER_D0         18
-#define READER_D1         17
+#define RELAY_SHUTDOWN    5  									 
+#define RELAY_REV_MODE    9   
+#define RELAY_REV_UP      46  
+#define RELAY_REV_DOWN    3   
+// --- MCP23017 VIRTUAL PINS (Port A & B) ---
+// Port A (0-7)
+#define MCP_MONTEE      0
+#define MCP_DESCENTE    1
+#define MCP_GV          2
+#define MCP_PV          3
+#define MCP_INSPECTION  4
+#define MCP_ML1         5
+#define MCP_ML2         6
+#define MCP_IMP_ARRET   7
+#define PIN_OUVERTURE   38  
+#define PIN_FERMETURE   39  
+// Port B (8-15)
+#define MCP_IMP_PV      8
+#define MCP_LIMIT_H     9
+#define MCP_LIMIT_L     10
+#define MCP_SEC_GEN     11
+#define MCP_SEC_PORTE   12
+#define MCP_PHOTO       13
+#define MCP_DOOR_PHYS   14
+#define MCP_FAULT       15
 
 #define ACCESS_GRANTED_DURATION 2000 
 
@@ -69,19 +69,18 @@ const int   MQTT_PORT      = 1883;
 int THIS_ELEVATOR_ID = -1; 
 String DEVICE_MAC = "";
 
+Adafruit_MCP23X17 mcp;
 WiFiClient wifiClient;
 PubSubClient mqttClient(wifiClient);
 HttpClient httpClient(wifiClient, BACKEND_SERVER, BACKEND_PORT);
 WIEGAND wg;
-
-// Data Structures
+			  
 struct PermissionRule { unsigned long card_code; int relay_to_activate; };
 std::vector<PermissionRule> permissions;
 
 struct RelayTimer { int relay_pin; unsigned long turn_off_time; };
 std::vector<RelayTimer> active_relays;
-
-// State Tracking
+			 
 String lastStatus = "IDLE";
 unsigned long lastDebounceTime = 0;
 
@@ -94,24 +93,55 @@ void mqttCallback(char* topic, byte* payload, unsigned int length);
 void setupPins();
 void checkWiegandReaders();
 void checkRelayTimers();
-void checkElevatorState(); // <--- THE NEW LOGIC
+void checkElevatorState(); 
 void publishStatus(String status, String details);
 void grantAccess(unsigned long card_code);
 void publishAccessEvent(unsigned long card_code, bool granted);
-
+void pressCallButton(int relayPin, String floorName);
+void printWhitelist();
+bool checkGlobalAccess(unsigned long card_code);
 // ==========================================
 //      MAIN SETUP
 // ==========================================
 void setup() {
   Serial.begin(115200);
   delay(1000);
-  Serial.println("\n\n--- ESP32 ELEVATOR CONTROLLER (FULL SIMULATION) ---");
+  Serial.println("\n--- BIOSWITCH: ESP32 + MCP23017 READY ---");
+
+  // Initialize I2C and MCP
+  Wire.begin(I2C_SDA, I2C_SCL);
+  if (!mcp.begin_I2C(0x20)) {
+    Serial.println("Error: MCP23017 not found! Check wiring.");
+  //  while (1);
+  }
+
+  pinMode(18, INPUT_PULLUP);
+  pinMode(17, INPUT_PULLUP);
+
+  pinMode(16, INPUT_PULLUP);
+  pinMode(15, INPUT_PULLUP);
+
+  pinMode(14, INPUT_PULLUP);
+  pinMode(13, INPUT_PULLUP);
+
+  readerF1.begin(18, 17);
+  readerF2.begin(16, 15);
+  readerF3.begin(14, 13);
+
+  // Initialize Relays
+  pinMode(RELAY_F1, OUTPUT);
+  pinMode(RELAY_F2, OUTPUT);
+  pinMode(RELAY_F3, OUTPUT);
+  
+  // Set Relays to OFF (Assuming Active LOW relay board, HIGH = OFF)
+  digitalWrite(RELAY_F1, HIGH); 
+  digitalWrite(RELAY_F2, HIGH);
+  digitalWrite(RELAY_F3, HIGH);
 
   setupPins();
-  wg.begin(READER_D0, READER_D1);
   setupWifi();
 
-  // Auto-Discovery
+				   
   while (!getElevatorConfig()) {
     Serial.println("... Waiting for registration.");
     delay(5000); 
@@ -119,132 +149,159 @@ void setup() {
 
   connectToMqtt();
   fetchPermissions(); 
-  Serial.println("\n--- System Ready: Waiting for Signals ---");
+																
 }
 
 void loop() {
   if (!mqttClient.connected()) connectToMqtt();
   mqttClient.loop(); 
-  checkWiegandReaders();
+  //checkWiegandReaders();
   checkRelayTimers();
-  checkElevatorState(); // Replaces old checkSensors()
-}
+  //checkElevatorState(); 
 
+ // --- READER 1 (Floor 1) ---
+  if (readerF1.available()) {
+    unsigned long code = readerF1.getCode();
+    Serial.print("\n>>> Reader 1 Scanned: "); Serial.println(code);
+    
+    // Check if this card exists in our global list
+    if (checkGlobalAccess(code)) {
+        // If YES: 1. Open Door Relay, 2. Call Elevator to Floor 1
+        Serial.println(">> ✅ Access Granted (Global Rule)");
+        digitalWrite(RELAY_OPEN_DOOR, LOW); 
+        active_relays.push_back({RELAY_OPEN_DOOR, millis() + 2000}); // Keep open for 2s
+        
+        pressCallButton(RELAY_F1, "Floor 1"); // Specific call for this reader location
+    } else {
+        Serial.println(">> ❌ Access Denied");
+    }
+  }
+
+  // --- READER 2 (Floor 2) ---
+  if (readerF2.available()) {
+    unsigned long code = readerF2.getCode();
+    Serial.print("\n>>> Reader 2 Scanned: "); Serial.println(code);
+
+    if (checkGlobalAccess(code)) {
+        Serial.println(">> ✅ Access Granted (Global Rule)");
+        digitalWrite(RELAY_OPEN_DOOR, LOW); 
+        active_relays.push_back({RELAY_OPEN_DOOR, millis() + 2000});
+        
+        pressCallButton(RELAY_F2, "Floor 2"); // Specific call for this reader location
+    } else {
+        Serial.println(">> ❌ Access Denied");
+    }
+  }
+
+  // --- READER 3 (Floor 3) ---
+  if (readerF3.available()) {
+    unsigned long code = readerF3.getCode();
+    Serial.print("\n>>> Reader 3 Scanned: "); Serial.println(code);
+
+    if (checkGlobalAccess(code)) {
+        Serial.println(">> ✅ Access Granted (Global Rule)");
+        digitalWrite(RELAY_OPEN_DOOR, LOW); 
+        active_relays.push_back({RELAY_OPEN_DOOR, millis() + 2000});
+        
+        pressCallButton(RELAY_F3, "Floor 3"); // Specific call for this reader location
+    } else {
+        Serial.println(">> ❌ Access Denied");
+    }
+  }
+}
+bool checkGlobalAccess(unsigned long card_code) {
+  // Look through the ENTIRE list. If card is found, return true.
+  for (const auto& rule : permissions) {
+    if (rule.card_code == card_code) {
+      return true;
+    }
+  }
+  return false;
+}
 // ==========================================
 //      HARDWARE FUNCTIONS
 // ==========================================
 void setupPins() {
-  // Inputs (Active Low logic - HIGH by default, LOW when wire touches GND)
-  pinMode(PIN_DOOR_SENSOR, INPUT_PULLUP);
-  pinMode(PIN_FAULT_SIGNAL, INPUT_PULLUP);
-  
-  pinMode(PIN_MONTEE, INPUT_PULLUP);
-  pinMode(PIN_DESCENTE, INPUT_PULLUP);
-  pinMode(PIN_GV, INPUT_PULLUP);
-  pinMode(PIN_PV, INPUT_PULLUP);
-  pinMode(PIN_INSPECTION, INPUT_PULLUP);
-  
-  // Group 2
-  pinMode(PIN_ML1, INPUT_PULLUP);
-  pinMode(PIN_ML2, INPUT_PULLUP);
-  pinMode(PIN_IMP_ARRET, INPUT_PULLUP);
-  pinMode(PIN_IMP_PV, INPUT_PULLUP);
-  pinMode(PIN_EXTREME_HAUT, INPUT_PULLUP);
-  pinMode(PIN_EXTREME_BAS, INPUT_PULLUP);
+  // --- 1. ESP32 Relay Outputs ---
+  int relayPins[] = {6, 4, 5, 9, 46, 3};
+  for(int p : relayPins) {
+    pinMode(p, OUTPUT);
+    digitalWrite(p, HIGH); 
+  }
 
-  // Group 3
-  pinMode(PIN_SEC_GENERALE, INPUT_PULLUP);
-  pinMode(PIN_SEC_PORTE, INPUT_PULLUP);
+  // --- 2. ESP32 Native Inputs (The 2 we moved back) ---
   pinMode(PIN_OUVERTURE, INPUT_PULLUP);
   pinMode(PIN_FERMETURE, INPUT_PULLUP);
-  pinMode(PIN_PHOTOCELLULE, INPUT_PULLUP);
 
-  // Outputs
-  pinMode(RELAY_OPEN_DOOR, OUTPUT);
-  pinMode(RELAY_CLOSE_DOOR, OUTPUT);
-  pinMode(RELAY_SHUTDOWN, OUTPUT);
-  pinMode(RELAY_REV_MODE, OUTPUT);
-  pinMode(RELAY_REV_UP, OUTPUT);
-  pinMode(RELAY_REV_DOWN, OUTPUT);
+  // --- 3. MCP23017 Expansion Inputs ---
+  for (int i = 0; i < 16; i++) {
+    mcp.pinMode(i, INPUT_PULLUP); 
+  }
+}
+
+void pressCallButton(int relayPin, String floorName) {
+  Serial.println(">> Action: Calling elevator to " + floorName);
   
-  // Default OFF (High for Active Low Relays)
-  digitalWrite(RELAY_OPEN_DOOR, HIGH);
-  digitalWrite(RELAY_CLOSE_DOOR, HIGH);
-  digitalWrite(RELAY_SHUTDOWN, HIGH);
-  digitalWrite(RELAY_REV_MODE, HIGH);
-  digitalWrite(RELAY_REV_UP, HIGH);
-  digitalWrite(RELAY_REV_DOWN, HIGH);  
+  digitalWrite(relayPin, LOW);  // Close the relay contact (Press button)
+  delay(1000);                  // Wait 1 second
+  digitalWrite(relayPin, HIGH); // Open the relay contact (Release button)
+  
+  Serial.println(">> Call Completed.");
 }
 
 void checkElevatorState() {
   if (millis() - lastDebounceTime < 500) return; 
 
-  // --- 1. READ ALL 18 PINS (LOW = ACTIVE) ---
-  
-  // Group 1: Commands
-  bool m_up       = digitalRead(PIN_MONTEE) == LOW;
-  bool m_down     = digitalRead(PIN_DESCENTE) == LOW;
-  bool m_gv       = digitalRead(PIN_GV) == LOW;
-  bool m_pv       = digitalRead(PIN_PV) == LOW;
-  bool m_insp     = digitalRead(PIN_INSPECTION) == LOW;
-  
-  // Group 2: Position Sensors
-  bool s_ml1      = digitalRead(PIN_ML1) == LOW;
-  bool s_ml2      = digitalRead(PIN_ML2) == LOW;
-  bool s_imp_stop = digitalRead(PIN_IMP_ARRET) == LOW;
-  bool s_imp_pv   = digitalRead(PIN_IMP_PV) == LOW;
-  bool s_limit_h  = digitalRead(PIN_EXTREME_HAUT) == LOW;
-  bool s_limit_l  = digitalRead(PIN_EXTREME_BAS) == LOW;
+  // --- 1. READ FROM MCP23017 (Sensors) ---
+  bool m_up       = mcp.digitalRead(MCP_MONTEE) == LOW;
+  bool m_down     = mcp.digitalRead(MCP_DESCENTE) == LOW;
+  bool m_gv       = mcp.digitalRead(MCP_GV) == LOW;
+  bool m_pv       = mcp.digitalRead(MCP_PV) == LOW;
+  bool m_insp     = mcp.digitalRead(MCP_INSPECTION) == LOW;
+  bool s_ml1      = mcp.digitalRead(MCP_ML1) == LOW;
+  bool s_ml2      = mcp.digitalRead(MCP_ML2) == LOW;
+  bool s_imp_stop = mcp.digitalRead(MCP_IMP_ARRET) == LOW;
+  bool s_imp_pv   = mcp.digitalRead(MCP_IMP_PV) == LOW;
+  bool s_limit_h  = mcp.digitalRead(MCP_LIMIT_H) == LOW;
+  bool s_limit_l  = mcp.digitalRead(MCP_LIMIT_L) == LOW;
+  bool s_photo    = mcp.digitalRead(MCP_PHOTO) == LOW;
+  bool s_door_phys= mcp.digitalRead(MCP_DOOR_PHYS) == LOW;
+  bool s_fault    = mcp.digitalRead(MCP_FAULT) == LOW;
 
-  // Group 3: Door & Safety Signals
-  bool s_photo    = digitalRead(PIN_PHOTOCELLULE) == LOW;
-  bool s_open_cmd = digitalRead(PIN_OUVERTURE) == LOW;
-  bool s_close_cmd= digitalRead(PIN_FERMETURE) == LOW;
-  
-  // Safety Chains (Remember: HIGH means Broken/Triggered)
-  bool s_gen_broken = digitalRead(PIN_SEC_GENERALE) == HIGH;
-  bool s_door_broken = digitalRead(PIN_SEC_PORTE) == HIGH;
+  // Safety Chains (Active High = Problem)
+  bool s_gen_broken  = mcp.digitalRead(MCP_SEC_GEN) == HIGH;
+  bool s_door_broken = mcp.digitalRead(MCP_SEC_PORTE) == HIGH;
 
-  // Group 4: Physical Sensors (I missed these before!)
-  bool s_door_phys = digitalRead(PIN_DOOR_SENSOR) == LOW;
-  bool s_fault     = digitalRead(PIN_FAULT_SIGNAL) == LOW;
+  // --- 2. READ FROM ESP32 (Door Command Signals) ---
+  bool s_open_sig  = digitalRead(PIN_OUVERTURE) == LOW;
+  bool s_close_sig = digitalRead(PIN_FERMETURE) == LOW;
 
-  // --- 2. BUILD STATUS STRING (Check EVERYTHING) ---
+  // --- 3. BUILD STATUS STRING ---
   String activeStates = "";
 
-  // Safety First
   if (s_gen_broken)  activeStates += "URGENCE + ";
   if (s_door_broken) activeStates += "SEC_PORTE_OPEN + ";
   if (s_fault)       activeStates += "FAULT_GENERAL + ";
-
-  // Limits
   if (s_limit_h)     activeStates += "LIMIT_HAUT + ";
   if (s_limit_l)     activeStates += "LIMIT_BAS + ";
-
-  // Maintenance
   if (m_insp)        activeStates += "INSPECTION + ";
-
-  // Commands
   if (m_up)          activeStates += "CMD_MONTEE + ";
   if (m_down)        activeStates += "CMD_DESCENTE + ";
   if (m_gv)          activeStates += "CMD_GV + ";
   if (m_pv)          activeStates += "CMD_PV + ";
-
-  // Position Sensors
   if (s_ml1)         activeStates += "ML1 + ";
   if (s_ml2)         activeStates += "ML2 + ";
   if (s_imp_stop)    activeStates += "IMP_ARRET + ";
   if (s_imp_pv)      activeStates += "IMP_PV + ";
-
-  // Door Status
   if (s_photo)       activeStates += "OBSTACLE + ";
-  if (s_open_cmd)    activeStates += "CMD_OUVERTURE + ";
-  if (s_close_cmd)   activeStates += "CMD_FERMETURE + ";
   if (s_door_phys)   activeStates += "PORTE_PHYSIQUE_OPEN + ";
+  
+  // These use the signals read from ESP32
+  if (s_open_sig)    activeStates += "CMD_OUVERTURE + ";
+  if (s_close_sig)   activeStates += "CMD_FERMETURE + ";
 
-  // --- 3. CLEANUP & PUBLISH ---
+  // Cleanup & Publish
   if (activeStates.length() > 0) {
-    // Remove the last " + "
     if (activeStates.endsWith(" + ")) {
         activeStates = activeStates.substring(0, activeStates.length() - 3);
     }
@@ -252,21 +309,11 @@ void checkElevatorState() {
     activeStates = "IDLE";
   }
 
-  // Only send if something changed
   if (activeStates != lastStatus) {
     lastDebounceTime = millis();
     lastStatus = activeStates;
-    Serial.print("[STATE] ");
-    Serial.println(activeStates);
+    Serial.print("[STATE] "); Serial.println(activeStates);
     publishStatus(activeStates, "FULL_UPDATE");
-  }
-}
-
-void checkWiegandReaders() {
-  if(wg.available()) {
-    unsigned long code = wg.getCode();
-    Serial.printf("Card Swipe: %lu\n", code);
-    grantAccess(code);
   }
 }
 
@@ -333,6 +380,8 @@ void fetchPermissions() {
     }
     Serial.printf("Permissions Loaded: %d rules.\n", permissions.size());
   }
+  Serial.printf("Permissions Loaded: %d rules.\n", permissions.size());
+    printWhitelist(); // <--- ADD THIS LINE HERE
 }
 
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
@@ -432,6 +481,21 @@ void setupWifi() {
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   while (WiFi.status() != WL_CONNECTED) delay(500);
   Serial.println("WiFi Connected");
+}
+
+void printWhitelist() {
+  Serial.println("\n--- 📋 CURRENT WHITELIST (Allowed Cards) ---");
+  if (permissions.empty()) {
+    Serial.println("⚠️ MEMORY IS EMPTY! No cards are allowed.");
+  } else {
+    for (int i = 0; i < permissions.size(); i++) {
+      Serial.print("Rule #"); Serial.print(i + 1);
+      Serial.print(": Card ["); Serial.print(permissions[i].card_code);
+      Serial.print("] -> Relay ["); Serial.print(permissions[i].relay_to_activate);
+      Serial.println("]");
+    }
+  }
+  Serial.println("--------------------------------------------\n");
 }
 
 void connectToMqtt() {
