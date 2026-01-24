@@ -22,7 +22,7 @@ export default function AddElevatorScreen({ navigation }) {
   const [locationDesc, setLocationDesc] = useState('');
   const [loading, setLoading] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
-
+  const [mac, setMac] = useState('');
   const handleMapPress = (e) => {
     setSelectedCoord(e.nativeEvent.coordinate);
     setModalVisible(true);
