@@ -192,7 +192,86 @@ export async function getMyElevators(req, res) {
         res.status(500).json({ error: 'Could not fetch elevators.' });
     }
 }
+export async function getElevatorWhitelist(req, res) {
+    const { id } = req.params;
+    try {
+        const allowedCards = await prisma.card.findMany({
+            where: {
+                permissions: {
+                    some: {
+                        elevatorId: parseInt(id) 
+                        // ❌ REMOVED: isActive: true (Now we fetch blocked cards too!)
+                    }
+                }
+            },
+            include: {
+                // 1. Fetch User Details
+                user: { 
+                    select: {
+                        name: true,
+                        phone: true,
+                        role: true
+                    }
+                },
+                // 2. ✅ IMPORTANT: Fetch the permission status so we know if it's Blocked
+                permissions: {
+                    where: { elevatorId: parseInt(id) },
+                    select: { isActive: true }
+                }
+            }
+        });
+        res.json(allowedCards);
+    } catch (error) {
+        console.error("Error fetching whitelist:", error);
+        res.status(500).json({ error: "Failed to fetch whitelist" });
+    }
+}
 
+// --- ADD THIS AT THE BOTTOM OF elevatorController.js ---
+
+export async function toggleCardAccess(req, res) {
+    const elevatorId = parseInt(req.params.id);
+    const { cardId, action } = req.body; // action = "BLOCK" or "UNBLOCK"
+
+    try {
+        // 1. Determine status (BLOCK = false, UNBLOCK = true)
+        const isActive = action === "UNBLOCK"; 
+
+        // 2. Update the Database
+        // We look for the specific permission linking this Card to this Elevator
+        const updateResult = await prisma.permission.updateMany({
+            where: {
+                elevatorId: elevatorId,
+                cardId: parseInt(cardId)
+            },
+            data: {
+                isActive: isActive
+            }
+        });
+
+        if (updateResult.count === 0) {
+            return res.status(404).json({ error: "Card or permission not found." });
+        }
+
+        console.log(`✅ Access ${action}ED for Card ${cardId} on Elevator ${elevatorId}`);
+
+        // 3. IMPORTANT: Tell ESP32 to refresh immediately via MQTT!
+        // This forces the ESP32 to re-download the whitelist so the block happens NOW.
+        const topic = `elevators/${elevatorId}/commands`;
+        const message = JSON.stringify({
+            command: "UPDATE_PERMISSIONS" 
+        });
+        
+        // Ensure you imported 'publish' at the top of this file!
+        publish(topic, message); 
+
+        res.json({ message: `Card ${action}ED successfully` });
+
+    } catch (error) {
+        console.error("Error toggling access:", error);
+        res.status(500).json({ error: "Failed to toggle access" });
+    }
+}
 // --- HELPER FUNCTION (Haversine formula to calculate distance) ---
 function calculateDistance(lat1, lon1, lat2, lon2) {
     const R = 6371; // Radius of the Earth in km
