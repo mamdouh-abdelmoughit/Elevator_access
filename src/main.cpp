@@ -13,16 +13,45 @@
 // ==========================================
 const char* WIFI_SSID     = "La_Fibre_dOrange_2.4G_B283";      
 const char* WIFI_PASSWORD = "YY93EHUEPFCCQ7QQUK";  
-const char* BACKEND_SERVER = "192.168.11.105";      
+const char* BACKEND_SERVER = "192.168.11.107";      
 const int   BACKEND_PORT   = 3000;
 const char* MQTT_BROKER    = "broker.hivemq.com";
 const int   MQTT_PORT      = 1883;
 
 
 // Reader Instances
-WIEGAND readerF1; // Floor 1
-WIEGAND readerF2; // Floor 2
-WIEGAND readerF3; // Floor 3
+//WIEGAND readerF1; // Floor 1
+//WIEGAND readerF2; // Floor 2
+//WIEGAND readerF3; // Floor 3
+#define R1_D0 18
+#define R1_D1 17
+#define R2_D0 16
+#define R2_D1 15
+#define R3_D0 14
+#define R3_D1 13
+
+// --- MANUAL DATA STORAGE ---
+volatile unsigned long r1_code = 0;
+volatile int r1_bitCount = 0;
+volatile unsigned long r1_lastPulseTime = 0;
+
+volatile unsigned long r2_code = 0;
+volatile int r2_bitCount = 0;
+volatile unsigned long r2_lastPulseTime = 0;
+
+volatile unsigned long r3_code = 0;
+volatile int r3_bitCount = 0;
+volatile unsigned long r3_lastPulseTime = 0;
+
+// --- INTERRUPT SERVICE ROUTINES (ISRs) ---
+void IRAM_ATTR isr_r1_d0() { r1_code <<= 1; r1_bitCount++; r1_lastPulseTime = millis(); }
+void IRAM_ATTR isr_r1_d1() { r1_code <<= 1; r1_code |= 1; r1_bitCount++; r1_lastPulseTime = millis(); }
+
+void IRAM_ATTR isr_r2_d0() { r2_code <<= 1; r2_bitCount++; r2_lastPulseTime = millis(); }
+void IRAM_ATTR isr_r2_d1() { r2_code <<= 1; r2_code |= 1; r2_bitCount++; r2_lastPulseTime = millis(); }
+
+void IRAM_ATTR isr_r3_d0() { r3_code <<= 1; r3_bitCount++; r3_lastPulseTime = millis(); }
+void IRAM_ATTR isr_r3_d1() { r3_code <<= 1; r3_code |= 1; r3_bitCount++; r3_lastPulseTime = millis(); }
 
 const int RELAY_F1 = 20;
 const int RELAY_F2 = 21;
@@ -73,7 +102,7 @@ Adafruit_MCP23X17 mcp;
 WiFiClient wifiClient;
 PubSubClient mqttClient(wifiClient);
 HttpClient httpClient(wifiClient, BACKEND_SERVER, BACKEND_PORT);
-WIEGAND wg;
+//WIEGAND wg;
 			  
 struct PermissionRule { unsigned long card_code; int relay_to_activate; };
 std::vector<PermissionRule> permissions;
@@ -112,21 +141,23 @@ void setup() {
   Wire.begin(I2C_SDA, I2C_SCL);
   if (!mcp.begin_I2C(0x20)) {
     Serial.println("Error: MCP23017 not found! Check wiring.");
-  //  while (1);
+    while (1);
   }
 
-  pinMode(18, INPUT_PULLUP);
-  pinMode(17, INPUT_PULLUP);
+// --- READER 1 SETUP ---
+  pinMode(R1_D0, INPUT_PULLUP); pinMode(R1_D1, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(R1_D0), isr_r1_d0, FALLING);
+  attachInterrupt(digitalPinToInterrupt(R1_D1), isr_r1_d1, FALLING);
 
-  pinMode(16, INPUT_PULLUP);
-  pinMode(15, INPUT_PULLUP);
+  // --- READER 2 SETUP ---
+  pinMode(R2_D0, INPUT_PULLUP); pinMode(R2_D1, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(R2_D0), isr_r2_d0, FALLING);
+  attachInterrupt(digitalPinToInterrupt(R2_D1), isr_r2_d1, FALLING);
 
-  pinMode(14, INPUT_PULLUP);
-  pinMode(13, INPUT_PULLUP);
-
-  readerF1.begin(18, 17);
-  readerF2.begin(16, 15);
-  readerF3.begin(14, 13);
+  // --- READER 3 SETUP ---
+  pinMode(R3_D0, INPUT_PULLUP); pinMode(R3_D1, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(R3_D0), isr_r3_d0, FALLING);
+  attachInterrupt(digitalPinToInterrupt(R3_D1), isr_r3_d1, FALLING);
 
   // Initialize Relays
   pinMode(RELAY_F1, OUTPUT);
@@ -157,55 +188,73 @@ void loop() {
   mqttClient.loop(); 
   //checkWiegandReaders();
   checkRelayTimers();
-  //checkElevatorState(); 
-
- // --- READER 1 (Floor 1) ---
-  if (readerF1.available()) {
-    unsigned long code = readerF1.getCode();
-    Serial.print("\n>>> Reader 1 Scanned: "); Serial.println(code);
+  checkElevatorState(); 
+  // --- READER 1 ---
+  // If we have bits AND it's been 50ms since the last pulse (transmission done)
+  if (r1_bitCount > 0 && (millis() - r1_lastPulseTime > 50)) {
+    unsigned long rawCode = r1_code;
+    int bits = r1_bitCount;
     
-    // Check if this card exists in our global list
-    if (checkGlobalAccess(code)) {
-        // If YES: 1. Open Door Relay, 2. Call Elevator to Floor 1
-        Serial.println(">> ✅ Access Granted (Global Rule)");
-        digitalWrite(RELAY_OPEN_DOOR, LOW); 
-        active_relays.push_back({RELAY_OPEN_DOOR, millis() + 2000}); // Keep open for 2s
-        
-        pressCallButton(RELAY_F1, "Floor 1"); // Specific call for this reader location
+    // Reset for next swipe immediately
+    r1_code = 0; r1_bitCount = 0; 
+
+    if (bits >= 26) { // Filter out noise
+      unsigned long cleanCode = (rawCode >> 1) & 0x00FFFFFF;
+        Serial.print("\n>>> Reader 1 Raw: "); Serial.print(rawCode);
+        Serial.print(" | Clean: "); Serial.println(cleanCode);
+      if (checkGlobalAccess(cleanCode)) {
+         Serial.println(">> ✅ Access Granted");
+         digitalWrite(RELAY_OPEN_DOOR, LOW); 
+         //active_relays.push_back({RELAY_OPEN_DOOR, millis() + 2000});
+         pressCallButton(RELAY_F1, "Floor 1");
+      } else {
+         Serial.println(">> ❌ Access Denied");
+      }
     } else {
-        Serial.println(">> ❌ Access Denied");
+       // Optional: clear noise if bits < 26
+       r1_code = 0; r1_bitCount = 0;
     }
   }
 
-  // --- READER 2 (Floor 2) ---
-  if (readerF2.available()) {
-    unsigned long code = readerF2.getCode();
-    Serial.print("\n>>> Reader 2 Scanned: "); Serial.println(code);
+// --- READER 2 ---
+  if (r2_bitCount > 0 && (millis() - r2_lastPulseTime > 50)) {
+    unsigned long rawCode = r2_code;
+    int bits = r2_bitCount;
+    r2_code = 0; r2_bitCount = 0; 
 
-    if (checkGlobalAccess(code)) {
-        Serial.println(">> ✅ Access Granted (Global Rule)");
-        digitalWrite(RELAY_OPEN_DOOR, LOW); 
-        active_relays.push_back({RELAY_OPEN_DOOR, millis() + 2000});
-        
-        pressCallButton(RELAY_F2, "Floor 2"); // Specific call for this reader location
-    } else {
-        Serial.println(">> ❌ Access Denied");
+    if (bits >= 26) {
+      unsigned long cleanCode = (rawCode >> 1) & 0x00FFFFFF;
+        Serial.print("\n>>> Reader 2 Raw: "); Serial.print(rawCode);
+        Serial.print(" | Clean: "); Serial.println(cleanCode);
+      if (checkGlobalAccess(cleanCode)) {
+         Serial.println(">> ✅ Access Granted");
+         digitalWrite(RELAY_OPEN_DOOR, LOW); 
+         //active_relays.push_back({RELAY_OPEN_DOOR, millis() + 2000});
+         pressCallButton(RELAY_F2, "Floor 2");
+      } else {
+         Serial.println(">> ❌ Access Denied");
+      }
     }
   }
 
-  // --- READER 3 (Floor 3) ---
-  if (readerF3.available()) {
-    unsigned long code = readerF3.getCode();
-    Serial.print("\n>>> Reader 3 Scanned: "); Serial.println(code);
+// --- READER 3 ---
+  if (r3_bitCount > 0 && (millis() - r3_lastPulseTime > 50)) {
+    unsigned long rawCode = r3_code;
+    int bits = r3_bitCount;
+    r3_code = 0; r3_bitCount = 0; 
 
-    if (checkGlobalAccess(code)) {
-        Serial.println(">> ✅ Access Granted (Global Rule)");
-        digitalWrite(RELAY_OPEN_DOOR, LOW); 
-        active_relays.push_back({RELAY_OPEN_DOOR, millis() + 2000});
-        
-        pressCallButton(RELAY_F3, "Floor 3"); // Specific call for this reader location
-    } else {
-        Serial.println(">> ❌ Access Denied");
+    if (bits >= 26) {
+      unsigned long cleanCode = (rawCode >> 1) & 0x00FFFFFF;
+      Serial.print("\n>>> Reader 3 Raw: "); Serial.print(rawCode);
+      Serial.print(" | Clean: "); Serial.println(cleanCode);
+      if (checkGlobalAccess(cleanCode)) {
+         Serial.println(">> ✅ Access Granted");
+         digitalWrite(RELAY_OPEN_DOOR, LOW); 
+         //active_relays.push_back({RELAY_OPEN_DOOR, millis() + 2000});
+         pressCallButton(RELAY_F3, "Floor 3");
+      } else {
+         Serial.println(">> ❌ Access Denied");
+      }
     }
   }
 }
