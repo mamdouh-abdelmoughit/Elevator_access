@@ -1,7 +1,0 @@
--- CreateTable
-CREATE TABLE "Log" (
-    "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-    "timestamp" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "eventType" TEXT NOT NULL,
-    "details" JSONB NOT NULL
-);
