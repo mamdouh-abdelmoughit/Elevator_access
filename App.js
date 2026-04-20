@@ -20,11 +20,11 @@ import SignupScreen from './screens/SignupScreen';
 
 const LOCATION_TASK_NAME = 'background-location-task';
 // Use your backend address (same as other screens). If you run backend on device/emulator, adjust accordingly.
-const API_URL = 'http://192.168.0.193:3000';
+const API_URL = process.env.EXPO_PUBLIC_API_URL;
 
 // Background task definition.
 // This task runs even when the app is backgrounded (Expo taskManager + location set up required).
-/*TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
+TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
   if (error) {
     console.error('Background Task Error:', error);
     return;
@@ -93,7 +93,7 @@ const API_URL = 'http://192.168.0.193:3000';
     console.error('Background Task: Unexpected error', e);
   }
 });
-*/
+
 // Navigation stack
 const Stack = createNativeStackNavigator();
 

@@ -1,8 +1,8 @@
 // screens/HomeScreen.js
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, Alert, ActivityIndicator, Button, Linking } from 'react-native';
-// import * as Location from 'expo-location';       // <-- Commented out
-// import * as TaskManager from 'expo-task-manager'; // <-- Commented out
+import * as Location from 'expo-location';       // <-- Commented out
+import * as TaskManager from 'expo-task-manager'; // <-- Commented out
 
 const LOCATION_TASK_NAME = 'background-location-task';
 
@@ -21,7 +21,7 @@ export default function HomeScreen({ route, navigation }) {
     setIsLoading(false);
     setIsTaskRunning(false); 
 
-    /* 
+     
     // ORIGINAL LOGIC HIDDEN BELOW:
     try {
       const { status: fgStatus } = await Location.getForegroundPermissionsAsync();
@@ -51,7 +51,7 @@ export default function HomeScreen({ route, navigation }) {
     } finally {
       setIsLoading(false);
     }
-    */
+    
   }, []);
 
   // Check status on mount
@@ -66,15 +66,23 @@ export default function HomeScreen({ route, navigation }) {
 
   // --- USER ACTION ---
   const requestForeground = async () => {
-    Alert.alert("Disabled", "Location tracking is currently disabled for development.");
-    /*
+    // Alert.alert("Disabled", "Location tracking is currently disabled for development.");
     setIsLoading(true);
     const { status } = await Location.requestForegroundPermissionsAsync();
     if (status !== 'granted') {
       Alert.alert("Permission Required", "This app needs location access to work.");
+    setIsLoading(false);
+    return;
     }
-    await checkStatus();
-    */
+    // Also request background permission
+    const { status: bgStatus } = await Location.requestBackgroundPermissionsAsync();
+    if (bgStatus !== 'granted') {
+      Alert.alert("Background Permission Required", "Please allow location access 'All the time' in settings.");
+      setIsLoading(false);
+      return;
+    }
+  await checkStatus();
+    
   };
   
   // --- UI RENDERING ---
