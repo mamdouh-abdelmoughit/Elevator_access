@@ -65,26 +65,34 @@ export default function HomeScreen({ route, navigation }) {
 
 
   // --- USER ACTION ---
-  const requestForeground = async () => {
-    // Alert.alert("Disabled", "Location tracking is currently disabled for development.");
-    setIsLoading(true);
-    const { status } = await Location.requestForegroundPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert("Permission Required", "This app needs location access to work.");
+const requestForeground = async () => {
+  setIsLoading(true);
+  
+  // Step 1: request foreground first
+  const { status: fgStatus } = await Location.requestForegroundPermissionsAsync();
+  if (fgStatus !== 'granted') {
+    Alert.alert("Permission Required", "This app needs location access to work.");
     setIsLoading(false);
     return;
-    }
-    // Also request background permission
-    const { status: bgStatus } = await Location.requestBackgroundPermissionsAsync();
-    if (bgStatus !== 'granted') {
-      Alert.alert("Background Permission Required", "Please allow location access 'All the time' in settings.");
-      setIsLoading(false);
-      return;
-    }
+  }
+
+  // Step 2: then request background
+  const { status: bgStatus } = await Location.requestBackgroundPermissionsAsync();
+  if (bgStatus !== 'granted') {
+    Alert.alert(
+      "Background Permission Required", 
+      "Please select 'Allow all the time' in the next screen.",
+      [
+        { text: "Open Settings", onPress: () => Linking.openSettings() },
+        { text: "Cancel", style: "cancel" }
+      ]
+    );
+    setIsLoading(false);
+    return;
+  }
+
   await checkStatus();
-    
-  };
-  
+};
   // --- UI RENDERING ---
   const renderEmployeeStatus = () => {
     if (isLoading) {
