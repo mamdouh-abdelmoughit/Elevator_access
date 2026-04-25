@@ -33,6 +33,11 @@
         "backgroundColor": "#ffffff"
       },
       "package": "com.yourcompany.elevatorapp",
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyAEdwzouSrZxrLvD30TB_MMfVQNshTMy8A"
+        }
+      },
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION",
