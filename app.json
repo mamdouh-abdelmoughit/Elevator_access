@@ -64,8 +64,9 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "56717eed-bd26-4839-b7a6-52fbbb92a6df"
+        "projectId": "7cde12ff-f34c-475e-8f27-e7bc64a07407"
       }
-    }
+    },
+    "owner": "moughit123"
   }
 }

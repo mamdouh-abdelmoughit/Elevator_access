@@ -100,16 +100,24 @@ const Stack = createNativeStackNavigator();
 export default function App() {
   return (
     <NavigationContainer>
-      <Stack.Navigator initialRouteName="Login">
+      <Stack.Navigator 
+        initialRouteName="Login"
+        screenOptions={{
+          headerStyle: { backgroundColor: '#1E293B' },
+          headerTintColor: '#F8FAFC',
+          headerTitleStyle: { fontWeight: 'bold' },
+          contentStyle: { backgroundColor: '#0F172A' }
+        }}
+      >
         <Stack.Screen name="Map" component={MapScreen} options={{ title: 'Technician Map' }} />
         <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
-        <Stack.Screen name="Signup" component={SignupScreen} options={{ title: 'Create Account' }} />
-        <Stack.Screen name="Home" component={HomeScreen} options={{ title: 'Elevator Dashboard' }} />
+        <Stack.Screen name="Signup" component={SignupScreen} options={{ title: 'Create Account', headerStyle: { backgroundColor: '#0F172A' } }} />
+        <Stack.Screen name="Home" component={HomeScreen} options={{ title: 'Genestor Dashboard' }} />
         <Stack.Screen name="AddElevator" component={AddElevatorScreen} options={{ title: 'Install New Elevator' }} />
-        <Stack.Screen name="ElevatorDetail" component={ElevatorDetailScreen} options={{ title: 'Tableau de Bord' }} />
+        <Stack.Screen name="ElevatorDetail" component={ElevatorDetailScreen} options={{ title: 'Elevator Detail' }} />
         <Stack.Screen name="AdminInbox" component={AdminInboxScreen} options={{ title: 'Service Requests' }} />
-        <Stack.Screen name="AssignManager" component={AssignManagerScreen} options={{ title: 'Assign Managers' }} />
-        <Stack.Screen name="BuildingAccess" component={BuildingAccessScreen} options={{ title: 'Access Control' }} />
+        <Stack.Screen name="AssignManager" component={AssignManagerScreen} options={{ title: 'Assign Manager' }} />
+        <Stack.Screen name="BuildingAccess" component={BuildingAccessScreen} options={{ title: 'Building Access' }} />
       </Stack.Navigator>
     </NavigationContainer>
   );
