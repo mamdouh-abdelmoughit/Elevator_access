@@ -13,47 +13,41 @@ export default function HomeScreen({ route, navigation }) {
   const [isTaskRunning, setIsTaskRunning] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
-  // --- MODIFIED: Logic commented out to prevent errors ---
-  const checkStatus = useCallback(async () => {
-    console.log("Location tracking is temporarily DISABLED for debugging.");
-    
-    // Simulate that we are done loading so the UI shows up
-    setIsLoading(false);
-    setIsTaskRunning(false); 
+const checkStatus = useCallback(async () => {
+  try {
+    const { status: fgStatus } = await Location.getForegroundPermissionsAsync();
+    setForegroundPermission(fgStatus);
 
-     
-    // ORIGINAL LOGIC HIDDEN BELOW:
-    try {
-      const { status: fgStatus } = await Location.getForegroundPermissionsAsync();
-      setForegroundPermission(fgStatus);
+    if (fgStatus === 'granted') {
+      const { status: bgStatus } = await Location.getBackgroundPermissionsAsync();
       
-      if (fgStatus === 'granted') {
+      if (bgStatus === 'granted') {
         const isRunning = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
         if (!isRunning) {
           await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
-             accuracy: Location.Accuracy.Balanced,
-             distanceInterval: 20, 
-             deferredUpdatesInterval: 5000, 
-             foregroundService: {
-               notificationTitle: "Elevator Tracking",
-               notificationBody: "Technician location active."
-             },
-             showsBackgroundLocationIndicator: true, 
-             pausesUpdatesAutomatically: false,
+            accuracy: Location.Accuracy.Balanced,
+            distanceInterval: 20,
+            deferredUpdatesInterval: 5000,
+            foregroundService: {
+              notificationTitle: "Genestor Tracking",
+              notificationBody: "Location active",
+              notificationColor: "#FF6600",
+            },
+            showsBackgroundLocationIndicator: true,
+            pausesUpdatesAutomatically: false,
           });
         }
         setIsTaskRunning(true);
-      } else {
-        setIsTaskRunning(false);
       }
-    } catch (error) {
-      console.log("Error in checkStatus:", error);
-    } finally {
-      setIsLoading(false);
+    } else {
+      setIsTaskRunning(false);
     }
-    
-  }, []);
-
+  } catch (error) {
+    console.log("Error in checkStatus:", error);
+  } finally {
+    setIsLoading(false);
+  }
+}, []);
   // Check status on mount
   useEffect(() => {
     if (user.role === 'EMPLOYEE') {
