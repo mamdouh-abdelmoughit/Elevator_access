@@ -72,12 +72,14 @@ export async function getResidentsForSyndic(req, res) {
         
         // CHANGED: Removed "isActive: true" so we get EVERYONE
         const allResidents = await prisma.permission.findMany({
-            where: { 
+            where: {
                 elevatorId: elevatorId
             },
             select: {
-                isActive: true, // <--- Add this so we know their status
-                card: { select: { label: true } } 
+                id: true,
+                cardId: true,
+                isActive: true,
+                card: { select: { id: true, label: true } }
             }
         });
 
