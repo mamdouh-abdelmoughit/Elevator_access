@@ -1,0 +1,8 @@
+DATABASE_URL: "postgresql://postgres:a154EEB8F9%40%40%40@db.khtvrqkwdqpmeebasqod.supabase.co:5432/postgres"
+JWT_SECRET: "b104e261c9fc4bd933505a5fe35c43fc15d9db6b8e4661b9750009e3aa3b311aaa5440c41da460b89c6e3cf0c0d21204"
+ADMIN_PHONE: "0661418895"
+MQTT_BROKER_URL: "mqtt://broker.hivemq.com:1883"
+APP_LATEST_VERSION_CODE: "3"
+APP_LATEST_VERSION_NAME: "1.0.0"
+APP_APK_URL: "https://storage.googleapis.com/bioswitch-elevator-apks/elevator-app-v3.apk"
+APP_UPDATE_MANDATORY: "false"
