@@ -158,15 +158,22 @@ export async function identifyElevator(req, res) {
         res.status(500).json({ error: "Server error" });
     }
 }
-// Assign a Manager (Syndic) to an Elevator
+// Assign a Manager (Syndic) to an Elevator — ADMIN only
 export async function assignManager(req, res) {
+    if (req.user?.role !== 'ADMIN') {
+        return res.status(403).json({ error: 'Admin access required.' });
+    }
     try {
         const elevatorId = parseInt(req.params.id);
-        const { userId } = req.body; // The ID of the Syndic (User)
+        const { userId } = req.body;
+
+        if (isNaN(elevatorId) || !userId) {
+            return res.status(400).json({ error: 'elevatorId and userId are required.' });
+        }
 
         const updated = await prisma.elevator.update({
             where: { id: elevatorId },
-            data: { managerId: parseInt(userId) }
+            data: { managerId: parseInt(userId) },
         });
         res.json({ message: "Manager assigned successfully", elevator: updated });
     } catch (error) {
@@ -231,42 +238,47 @@ export async function getElevatorWhitelist(req, res) {
 
 export async function toggleCardAccess(req, res) {
     const elevatorId = parseInt(req.params.id);
-    const { cardId, action } = req.body; // action = "BLOCK" or "UNBLOCK"
+    const { cardId, action } = req.body;
+
+    if (isNaN(elevatorId)) {
+        return res.status(400).json({ error: "Invalid elevator ID." });
+    }
+    if (!cardId || !action) {
+        return res.status(400).json({ error: "cardId and action are required." });
+    }
+    if (action !== 'BLOCK' && action !== 'UNBLOCK') {
+        return res.status(400).json({ error: "action must be BLOCK or UNBLOCK." });
+    }
 
     try {
-        // 1. Determine status (BLOCK = false, UNBLOCK = true)
-        const isActive = action === "UNBLOCK"; 
-
-        // 2. Update the Database
-        // We look for the specific permission linking this Card to this Elevator
-        const updateResult = await prisma.permission.updateMany({
-            where: {
-                elevatorId: elevatorId,
-                cardId: parseInt(cardId)
-            },
-            data: {
-                isActive: isActive
+        // Only the elevator's own manager or an ADMIN may change access
+        if (req.user.role !== 'ADMIN') {
+            const elevator = await prisma.elevator.findUnique({
+                where: { id: elevatorId },
+                select: { managerId: true },
+            });
+            if (!elevator) {
+                return res.status(404).json({ error: "Elevator not found." });
             }
+            if (elevator.managerId !== req.user.id) {
+                return res.status(403).json({ error: "Not authorized for this elevator." });
+            }
+        }
+
+        const isActive = action === "UNBLOCK";
+
+        const updateResult = await prisma.permission.updateMany({
+            where: { elevatorId, cardId: parseInt(cardId) },
+            data:  { isActive },
         });
 
         if (updateResult.count === 0) {
             return res.status(404).json({ error: "Card or permission not found." });
         }
 
-        console.log(`✅ Access ${action}ED for Card ${cardId} on Elevator ${elevatorId}`);
-
-        // 3. IMPORTANT: Tell ESP32 to refresh immediately via MQTT!
-        // This forces the ESP32 to re-download the whitelist so the block happens NOW.
-        const topic = `elevators/${elevatorId}/commands`;
-        const message = JSON.stringify({
-            command: "UPDATE_PERMISSIONS" 
-        });
-        
-        // Ensure you imported 'publish' at the top of this file!
-        publish(topic, message); 
+        publish(`elevators/${elevatorId}/commands`, JSON.stringify({ command: "UPDATE_PERMISSIONS" }));
 
         res.json({ message: `Card ${action}ED successfully` });
-
     } catch (error) {
         console.error("Error toggling access:", error);
         res.status(500).json({ error: "Failed to toggle access" });

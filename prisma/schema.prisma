@@ -97,8 +97,11 @@ model Permission {
 }
 
 model Log {
-  id        Int      @id @default(autoincrement())
-  timestamp DateTime @default(now())
-  eventType String
-  details   Json
+  id         Int      @id @default(autoincrement())
+  timestamp  DateTime @default(now())
+  eventType  String
+  elevatorId Int?
+  details    Json
+
+  @@index([elevatorId, timestamp])
 }

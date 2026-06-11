@@ -1,17 +1,17 @@
-// src/api/routes/userRoutes.js
-
 import express from 'express';
-// Add 'updateUserLocation' to this list
-import { getAllUsers, createUser, updateUserLocation, loginUser, getManagers } from '../controllers/userController.js';
+import { getAllUsers, createUser, createEmployee, updateUserLocation, loginUser, getManagers } from '../controllers/userController.js';
+import auth from '../../middleware/auth.js';
 
 const router = express.Router();
 
-router.get('/', getAllUsers);
-router.get('/managers', getManagers); 
-router.post('/', createUser);
+// Public
 router.post('/login', loginUser);
+router.post('/',      createUser); // syndic self-registration (MANAGER only)
 
-// This line will now work correctly because the function has been imported
-router.post('/:id/location', updateUserLocation);
+// Protected — require valid JWT
+router.get('/',              auth, getAllUsers);
+router.get('/managers',      auth, getManagers);
+router.post('/employees',    auth, createEmployee); // manager creates technician account
+router.post('/:id/location', auth, updateUserLocation);
 
 export default router;

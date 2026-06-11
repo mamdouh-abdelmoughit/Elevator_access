@@ -20,10 +20,9 @@ export const handleAccessEvent = async (elevatorId, cardCode) => {
       console.log(`Access DENIED. Unknown card [${cardCodeString}].`);
       createLog("ACCESS_ATTEMPT", {
         cardCode: cardCodeString,
-        elevatorId,
         status: "DENIED",
         reason: "UNKNOWN_CARD"
-      });
+      }, elevatorId);
 
       // Publish DENIED back to device (use commands topic so device subscribed receives it)
       const denyTopic = `elevators/${elevatorId}/commands`;
@@ -49,10 +48,9 @@ export const handleAccessEvent = async (elevatorId, cardCode) => {
       console.log(`Access GRANTED for card ${cardCodeString}. Relay: ${permission.relay}`);
       createLog("ACCESS_ATTEMPT", {
         cardCode: cardCodeString,
-        elevatorId,
         status: "GRANTED",
         relayActivated: permission.relay
-      });
+      }, elevatorId);
 
       const msg = {
         command: 'ACCESS_RESPONSE',
@@ -65,10 +63,9 @@ export const handleAccessEvent = async (elevatorId, cardCode) => {
       console.log(`Access DENIED. Card ${cardCodeString} has no permission for elevator ${elevatorId}.`);
       createLog("ACCESS_ATTEMPT", {
         cardCode: cardCodeString,
-        elevatorId,
         status: "DENIED",
         reason: "NO_PERMISSION"
-      });
+      }, elevatorId);
 
       const msg = {
         command: 'ACCESS_RESPONSE',
@@ -81,9 +78,8 @@ export const handleAccessEvent = async (elevatorId, cardCode) => {
     console.error("Error processing access event:", error);
     createLog("ACCESS_FAILURE", {
       cardCode: cardCodeString,
-      elevatorId,
       error: error.message || 'unknown'
-    });
+    }, elevatorId);
   }
 };
 
