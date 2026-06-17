@@ -19,7 +19,10 @@ export async function getAllUsers(req, res) {
   }
   try {
     const users = await prisma.user.findMany({
-      select: { id: true, phone: true, name: true, role: true, createdAt: true }
+      select: {
+        id: true, phone: true, name: true, role: true, createdAt: true,
+        latitude: true, longitude: true, locationUpdatedAt: true,
+      },
     });
     res.json(users);
   } catch {
