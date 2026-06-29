@@ -1,6 +1,6 @@
 // screens/MapScreen.js
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ActivityIndicator, Alert, Text, TouchableOpacity, Image } from 'react-native';
+import { View, StyleSheet, ActivityIndicator, Text, TouchableOpacity } from 'react-native';
 import MapView, { Marker, PROVIDER_GOOGLE, Callout } from 'react-native-maps';
 import * as SecureStore from 'expo-secure-store';
 import { Linking } from 'react-native';
@@ -85,24 +85,19 @@ export default function MapScreen({ navigation }) {
             key={`elev-${elev.id}`}
             coordinate={{ latitude: elev.latitude, longitude: elev.longitude }}
             pinColor="blue"
-            title={elev.name}
-            description={elev.location}
           >
-            {/* 2. THE NEW CALLOUT BLOCK GOES HERE */}
-            <Callout onPress={() => navigation.navigate('ElevatorDetail', { 
-                elevatorId: elev.id, 
-                elevatorName: elev.name 
-            })}>
-                <View style={styles.calloutView}>
-                    <Text style={styles.calloutTitle}>🏢 {elev.name}</Text>
-                    <Text>{elev.location}</Text>
-                    <Text style={{fontWeight:'bold', color:'black', marginVertical: 2}}>
-                        Status: {elev.currentStatus || "Unknown"}
-                    </Text>
-                    <Text style={{color: 'blue', marginTop: 5, fontWeight: 'bold'}}>
-                        Tap for Controls ➔
-                    </Text>
-                </View>
+            <Callout tooltip={false}>
+              <View style={styles.calloutView}>
+                <Text style={styles.calloutTitle}>🏢 {elev.name}</Text>
+                <Text style={{fontSize:12, color:'#555'}}>{elev.location}</Text>
+                <Text style={{fontWeight:'bold', color:'black', marginVertical:4}}>
+                  {elev.currentStatus || 'Unknown'}
+                </Text>
+                <TouchableOpacity style={styles.calloutBtn}
+                  onPress={() => navigation.navigate('ElevatorDetail', { elevatorId: elev.id, elevatorName: elev.name })}>
+                  <Text style={styles.calloutBtnText}>Ouvrir les contrôles ➔</Text>
+                </TouchableOpacity>
+              </View>
             </Callout>
           </Marker>
         ))}
@@ -113,14 +108,16 @@ export default function MapScreen({ navigation }) {
             key={`tech-${tech.id}`}
             coordinate={{ latitude: tech.latitude, longitude: tech.longitude }}
             pinColor="green"
-            title={tech.name}
           >
-            <Callout onPress={() => handleCall(tech.phone)}>
-                <View style={styles.calloutView}>
-                    <Text style={styles.calloutTitle}>👷 {tech.name}</Text>
-                    <Text>Phone: {tech.phone}</Text>
-                    <Text style={{color: 'green', marginTop: 5}}>Tap to Call</Text>
-                </View>
+            <Callout tooltip={false}>
+              <View style={styles.calloutView}>
+                <Text style={styles.calloutTitle}>👷 {tech.name}</Text>
+                <Text style={{fontSize:12, color:'#555', marginBottom:8}}>{tech.phone}</Text>
+                <TouchableOpacity style={[styles.calloutBtn, {backgroundColor:'#16a34a'}]}
+                  onPress={() => handleCall(tech.phone)}>
+                  <Text style={styles.calloutBtnText}>📞 Appeler</Text>
+                </TouchableOpacity>
+              </View>
             </Callout>
           </Marker>
         ))}
@@ -150,13 +147,26 @@ const styles = StyleSheet.create({
     gap: 5
   },
   calloutView: {
-    width: 180, // Made slightly wider for the new text
-    padding: 5,
-    alignItems: 'center'
+    width: 190,
+    padding: 8,
+    alignItems: 'center',
   },
   calloutTitle: {
     fontWeight: 'bold',
-    marginBottom: 5,
-    fontSize: 16
+    marginBottom: 4,
+    fontSize: 15,
+  },
+  calloutBtn: {
+    backgroundColor: '#1d4ed8',
+    borderRadius: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    alignSelf: 'stretch',
+    alignItems: 'center',
+  },
+  calloutBtnText: {
+    color: 'white',
+    fontWeight: '600',
+    fontSize: 13,
   }
 });
