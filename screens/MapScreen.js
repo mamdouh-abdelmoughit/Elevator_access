@@ -136,7 +136,7 @@ export default function MapScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  container: { ...StyleSheet.absoluteFillObject },
+  container: { flex: 1 },
   map: { ...StyleSheet.absoluteFillObject },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   legend: {

@@ -1,18 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  Button, 
-  Alert, 
-  ActivityIndicator, 
-  TouchableOpacity, 
-  Modal, 
+import {
+  View,
+  Text,
+  StyleSheet,
+  Button,
+  Alert,
+  ActivityIndicator,
+  TouchableOpacity,
+  Modal,
   FlatList,
   RefreshControl
 } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import * as SecureStore from 'expo-secure-store';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL;
 
@@ -29,6 +31,7 @@ export default function ElevatorDetailScreen({ route }) {
   const [whitelistModalVisible, setWhitelistModalVisible] = useState(false);
   const [whitelist, setWhitelist] = useState([]);
   const [loadingList, setLoadingList] = useState(false);
+  const [downloadingLogs, setDownloadingLogs] = useState(false);
 
   // 1. Poll for Real-Time Status every 2 seconds
   useEffect(() => {
@@ -176,7 +179,38 @@ const renderCardItem = ({ item }) => {
       </View>
     );
   };
-  // 3. Send Command to ESP32
+  // 3. Download today's state logs as ZIP then auto-delete from DB
+  const handleDownloadLogs = async () => {
+    setDownloadingLogs(true);
+    try {
+      const token = await SecureStore.getItemAsync('authToken');
+      const today = new Date().toISOString().slice(0, 10);
+      const url   = `${API_URL}/logs/elevator/${elevatorId}/export?date=${today}`;
+
+      const dest = FileSystem.documentDirectory + `elevator-${elevatorId}-${today}.zip`;
+      const { status } = await FileSystem.downloadAsync(url, dest, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (status === 200) {
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(dest, { mimeType: 'application/zip' });
+        } else {
+          Alert.alert('Téléchargé', `Fichier enregistré dans :\n${dest}`);
+        }
+      } else if (status === 404) {
+        Alert.alert('Aucun log', "Pas de logs d'état pour aujourd'hui.");
+      } else {
+        Alert.alert('Erreur', `Téléchargement échoué (statut ${status}).`);
+      }
+    } catch (e) {
+      Alert.alert('Erreur réseau', e.message);
+    } finally {
+      setDownloadingLogs(false);
+    }
+  };
+
+  // 4. Send Command to ESP32
   const handleSendCommand = async () => {
     setLoading(true);
     try {
@@ -213,11 +247,23 @@ const renderCardItem = ({ item }) => {
         <Text style={styles.subText}>Dernière mise à jour: {lastUpdate}</Text>
         
         {/* BUTTON TO OPEN MODAL */}
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.whitelistButton}
           onPress={() => setWhitelistModalVisible(true)}
         >
           <Text style={styles.whitelistButtonText}>🔑 Voir les Cartes Actives</Text>
+        </TouchableOpacity>
+
+        {/* DOWNLOAD TODAY'S STATE LOGS */}
+        <TouchableOpacity
+          style={[styles.whitelistButton, { backgroundColor: '#1a5276', marginTop: 10 }]}
+          onPress={handleDownloadLogs}
+          disabled={downloadingLogs}
+        >
+          {downloadingLogs
+            ? <ActivityIndicator color="#fff" />
+            : <Text style={styles.whitelistButtonText}>📥 Télécharger Logs du Jour</Text>
+          }
         </TouchableOpacity>
       </View>
 

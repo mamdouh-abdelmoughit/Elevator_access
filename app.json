@@ -44,7 +44,8 @@
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.ACCESS_BACKGROUND_LOCATION",
         "android.permission.FOREGROUND_SERVICE_LOCATION",
-        "android.permission.RECEIVE_BOOT_COMPLETED"
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.REQUEST_INSTALL_PACKAGES"
       ]
     },
     "web": {
@@ -68,6 +69,15 @@
       "expo-localization",
       "expo-secure-store"
     ],
+    "updates": {
+      "enabled": true,
+      "url": "https://u.expo.dev/7cde12ff-f34c-475e-8f27-e7bc64a07407",
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0
+    },
+    "runtimeVersion": {
+      "policy": "sdkVersion"
+    },
     "extra": {
       "eas": {
         "projectId": "7cde12ff-f34c-475e-8f27-e7bc64a07407"

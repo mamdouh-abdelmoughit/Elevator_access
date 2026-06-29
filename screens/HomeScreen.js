@@ -152,12 +152,20 @@ const requestForeground = async () => {
             <Text style={styles.actionCardSubtitle}>Service request inbox</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity 
-            style={[styles.actionCard, { borderLeftColor: '#8B5CF6' }]} 
+          <TouchableOpacity
+            style={[styles.actionCard, { borderLeftColor: '#8B5CF6' }]}
             onPress={() => navigation.navigate('AssignManager')}
           >
             <Text style={styles.actionCardTitle}>👥 Assign Syndics</Text>
             <Text style={styles.actionCardSubtitle}>Assign managers to elevators</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.actionCard, { borderLeftColor: '#EC4899' }]}
+            onPress={() => navigation.navigate('CreateEmployee')}
+          >
+            <Text style={styles.actionCardTitle}>👷 Créer un technicien</Text>
+            <Text style={styles.actionCardSubtitle}>Créer les identifiants d'un technicien</Text>
           </TouchableOpacity>
         </View>
       )}

@@ -41,9 +41,6 @@ const handleLogin = async () => {
       <TextInput style={styles.input} placeholder="Enter phone number" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
       <TextInput style={styles.input} placeholder="Enter password" value={password} onChangeText={setPassword} secureTextEntry />
       <Button title={t('login')} onPress={handleLogin} />
-      <TouchableOpacity onPress={() => navigation.navigate('Signup')}>
-        <Text style={styles.linkText}>{t('dontHaveAccount')}</Text>
-      </TouchableOpacity>
       </View>
     </SafeAreaView>
   );
@@ -62,5 +59,4 @@ const styles = StyleSheet.create({
   },
   title: { fontSize: 24, fontWeight: 'bold', textAlign: 'center', marginBottom: 20 },
   input: { width: '100%', height: 40, borderColor: 'gray', borderWidth: 1, borderRadius: 5, marginBottom: 15, paddingHorizontal: 10 },
-  linkText: { color: 'blue', textAlign: 'center', marginTop: 20 },
 });
