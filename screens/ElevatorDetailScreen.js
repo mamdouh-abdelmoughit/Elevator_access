@@ -9,11 +9,12 @@ import {
   TouchableOpacity,
   Modal,
   FlatList,
-  RefreshControl
+  RefreshControl,
+  ScrollView,
 } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import * as SecureStore from 'expo-secure-store';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL;
@@ -237,7 +238,7 @@ const renderCardItem = ({ item }) => {
   };
 
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.container} contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
       <Text style={styles.header}>{elevatorName}</Text>
       
       {/* STATUS SECTION */}
@@ -284,6 +285,10 @@ const renderCardItem = ({ item }) => {
             <Picker.Item label="🟢 Arrêt Urgence (ON)" value="SHUTDOWN_ON" />
             <Picker.Item label="🔴 Arrêt Urgence (OFF)" value="SHUTDOWN_OFF" />
             
+            <Picker.Item label="--- ACCÈS CABINE ---" value="" enabled={false} />
+            <Picker.Item label="🔓 Accès libre (tous les étages, sans badge)" value="FREE_ACCESS_ON" />
+            <Picker.Item label="🔒 Fin de l'accès libre" value="FREE_ACCESS_OFF" />
+
             <Picker.Item label="--- MODE RÉVISION ---" value="" enabled={false} />
             <Picker.Item label="🟢 Activer Révision (ON)" value="REVISION_MODE_ON" />
             <Picker.Item label="🔴 Désactiver Révision (OFF)" value="REVISION_MODE_OFF" />
@@ -342,12 +347,12 @@ const renderCardItem = ({ item }) => {
 
         </View>
       </Modal>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20, backgroundColor: '#f4f4f4' },
+  container: { flex: 1, backgroundColor: '#f4f4f4' },
   header: { fontSize: 24, fontWeight: 'bold', marginBottom: 20, textAlign: 'center' },
   card: { backgroundColor: 'white', padding: 20, borderRadius: 10, elevation: 3 },
   label: { fontSize: 16, color: 'gray', marginBottom: 5 },

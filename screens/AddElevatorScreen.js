@@ -1,11 +1,16 @@
 // screens/AddElevatorScreen.js
 import React, { useState } from 'react';
-import { 
-  View, Text, StyleSheet, TextInput, Button, Alert, 
-  KeyboardAvoidingView, Platform, Modal 
+import {
+  View, Text, StyleSheet, TextInput, Button, Alert,
+  KeyboardAvoidingView, Platform, Modal, ScrollView,
 } from 'react-native';
-import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+import { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+import FillMapView from '../components/FillMapView';
 import * as SecureStore from 'expo-secure-store';
+
+// Google Maps on Android; Apple Maps on iOS (Google Maps on iOS needs a custom
+// native build — in Expo Go it renders an empty view).
+const MAP_PROVIDER = Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined;
 
 const MOROCCO_REGION = {
   latitude: 31.7917,
@@ -74,8 +79,8 @@ export default function AddElevatorScreen({ navigation }) {
         </Text>
       </View>
 
-      <MapView
-        provider={PROVIDER_GOOGLE}
+      <FillMapView
+        provider={MAP_PROVIDER}
         style={styles.map}
         initialRegion={MOROCCO_REGION}
         onPress={handleMapPress}
@@ -83,7 +88,7 @@ export default function AddElevatorScreen({ navigation }) {
         {selectedCoord && (
           <Marker coordinate={selectedCoord} pinColor="red" draggable />
         )}
-      </MapView>
+      </FillMapView>
 
       <Modal
         animationType="slide"
@@ -95,7 +100,7 @@ export default function AddElevatorScreen({ navigation }) {
           behavior={Platform.OS === "ios" ? "padding" : "height"}
           style={styles.modalContainer}
         >
-          <View style={styles.modalContent}>
+          <ScrollView style={styles.modalContent} keyboardShouldPersistTaps="handled">
             <Text style={styles.modalTitle}>Install New Elevator</Text>
             
             {/* --- COORDINATES (Read Only) --- */}
@@ -132,13 +137,13 @@ export default function AddElevatorScreen({ navigation }) {
 
             <View style={styles.buttonRow}>
               <Button title="Cancel" onPress={() => setModalVisible(false)} color="red" />
-              <Button 
-                title={loading ? "Saving..." : "Confirm Installation"} 
-                onPress={handleSave} 
-                disabled={loading} 
+              <Button
+                title={loading ? "Saving..." : "Confirm Installation"}
+                onPress={handleSave}
+                disabled={loading}
               />
             </View>
-          </View>
+          </ScrollView>
         </KeyboardAvoidingView>
       </Modal>
     </View>
@@ -147,7 +152,7 @@ export default function AddElevatorScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  map: { flex: 1 },
+  map: { position: 'relative', flex: 1 }, // fills the space below the header
   header: { padding: 15, backgroundColor: 'white', elevation: 3 },
   instructionText: { textAlign: 'center', fontWeight: 'bold' },
   modalContainer: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.3)' },

@@ -67,7 +67,10 @@
         }
       ],
       "expo-localization",
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-notifications",
+      "expo-sharing",
+      "expo-status-bar"
     ],
     "updates": {
       "enabled": true,

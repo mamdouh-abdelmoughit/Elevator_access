@@ -1,6 +1,6 @@
 // screens/SignupScreen.js
 import React, { useState } from 'react';
-import { View, Text, TextInput, Button, StyleSheet, Alert, TouchableOpacity, SafeAreaView} from 'react-native';
+import { View, Text, TextInput, Button, StyleSheet, Alert, TouchableOpacity, SafeAreaView, ScrollView } from 'react-native';
 import { useTranslation } from 'react-i18next';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL;
@@ -45,7 +45,7 @@ export default function SignupScreen({ navigation }) {
 
   return (
     <SafeAreaView style={styles.container}>
-        <View style={styles.innerContainer}>
+      <ScrollView contentContainerStyle={styles.innerContainer} keyboardShouldPersistTaps="handled">
       <Text style={styles.title}>{t('createAccount')}</Text>
       
       <TextInput
@@ -75,7 +75,7 @@ export default function SignupScreen({ navigation }) {
       <TouchableOpacity onPress={() => navigation.navigate('Login')}>
         <Text style={styles.linkText}>{t('alreadyHaveAccount')}</Text>
       </TouchableOpacity>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }

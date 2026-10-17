@@ -1,10 +1,14 @@
 // screens/HomeScreen.js
-import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, Alert, ActivityIndicator, TouchableOpacity, Linking } from 'react-native';
-import * as Location from 'expo-location';       // <-- Commented out
-import * as TaskManager from 'expo-task-manager'; // <-- Commented out
+import React, { useState, useCallback, useEffect } from 'react';
+import { View, Text, StyleSheet, Alert, ActivityIndicator, TouchableOpacity, Linking, ScrollView } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
+import * as Location from 'expo-location';
+import * as TaskManager from 'expo-task-manager';
+import * as SecureStore from 'expo-secure-store';
 
 const LOCATION_TASK_NAME = 'background-location-task';
+const API_URL = process.env.EXPO_PUBLIC_API_URL;
+const FG_SEND_INTERVAL_MS = 25000;
 
 export default function HomeScreen({ route, navigation }) {
   const { user } = route.params;
@@ -12,11 +16,47 @@ export default function HomeScreen({ route, navigation }) {
   const [foregroundPermission, setForegroundPermission] = useState(null);
   const [isTaskRunning, setIsTaskRunning] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [fgGranted, setFgGranted] = useState(false);
+  const [lastSent, setLastSent] = useState(null);
+  const [sendError, setSendError] = useState(null);
+
+  // ── Foreground position push ────────────────────────────────────────────────
+  // Works with "While using the app" permission. Runs while this screen is
+  // mounted (the technician's home screen), so the server always has a recent
+  // fix even when the OS never fires the background task.
+  const sendNow = useCallback(async () => {
+    if (user.role !== 'EMPLOYEE' || !user?.id) return;
+    try {
+      const token = await SecureStore.getItemAsync('authToken');
+      if (!token) { setSendError('Session expirée — reconnectez-vous.'); return; }
+
+      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      const res = await fetch(`${API_URL}/users/${user.id}/location`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
+      });
+      if (!res.ok) throw new Error(`Serveur ${res.status}`);
+      setLastSent(Date.now());
+      setSendError(null);
+    } catch (e) {
+      setSendError(e?.message || "Échec de l'envoi de la position");
+    }
+  }, [user.role, user?.id]);
+
+  // Immediate send + periodic send while the screen is mounted and permitted.
+  useEffect(() => {
+    if (user.role !== 'EMPLOYEE' || !fgGranted) return;
+    sendNow();
+    const id = setInterval(sendNow, FG_SEND_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [user.role, fgGranted, sendNow]);
 
 const checkStatus = useCallback(async () => {
   try {
     const { status: fgStatus } = await Location.getForegroundPermissionsAsync();
     setForegroundPermission(fgStatus);
+    setFgGranted(fgStatus === 'granted');
 
     if (fgStatus === 'granted') {
       const { status: bgStatus } = await Location.getBackgroundPermissionsAsync();
@@ -24,20 +64,30 @@ const checkStatus = useCallback(async () => {
       if (bgStatus === 'granted') {
         const isRunning = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
         if (!isRunning) {
-          await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
-            accuracy: Location.Accuracy.Balanced,
-            distanceInterval: 20,
-            deferredUpdatesInterval: 5000,
-            foregroundService: {
-              notificationTitle: "Genestor Tracking",
-              notificationBody: "Location active",
-              notificationColor: "#FF6600",
-            },
-            showsBackgroundLocationIndicator: true,
-            pausesUpdatesAutomatically: false,
-          });
+          try {
+            await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
+              accuracy: Location.Accuracy.Balanced,
+              timeInterval: 30000,        // report even when the phone isn't moving
+              distanceInterval: 15,
+              deferredUpdatesInterval: 30000,
+              foregroundService: {
+                notificationTitle: "Genestor Tracking",
+                notificationBody: "Location active",
+                notificationColor: "#FF6600",
+              },
+              showsBackgroundLocationIndicator: true,
+              pausesUpdatesAutomatically: false,
+            });
+            setIsTaskRunning(true);
+          } catch (e) {
+            // Background service failed to start — foreground push still covers us.
+            setIsTaskRunning(false);
+          }
+        } else {
+          setIsTaskRunning(true);
         }
-        setIsTaskRunning(true);
+      } else {
+        setIsTaskRunning(false);
       }
     } else {
       setIsTaskRunning(false);
@@ -48,45 +98,56 @@ const checkStatus = useCallback(async () => {
     setIsLoading(false);
   }
 }, []);
-  // Check status on mount
-  useEffect(() => {
-    if (user.role === 'EMPLOYEE') {
-      checkStatus();
-    } else {
-      setIsLoading(false);
-    }
-  }, [user.role, checkStatus]);
+  // Re-check every time this screen comes into focus (handles logout → login)
+  useFocusEffect(
+    useCallback(() => {
+      if (user.role === 'EMPLOYEE') {
+        setIsLoading(true);
+        checkStatus();
+      } else {
+        setIsLoading(false);
+      }
+    }, [user.role, checkStatus])
+  );
 
 
   // --- USER ACTION ---
-const requestForeground = async () => {
-  setIsLoading(true);
-  
-  // Step 1: request foreground first
-  const { status: fgStatus } = await Location.requestForegroundPermissionsAsync();
-  if (fgStatus !== 'granted') {
-    Alert.alert("Permission Required", "This app needs location access to work.");
-    setIsLoading(false);
-    return;
-  }
+  const requestForeground = async () => {
+    setIsLoading(true);
 
-  // Step 2: then request background
-  const { status: bgStatus } = await Location.requestBackgroundPermissionsAsync();
-  if (bgStatus !== 'granted') {
-    Alert.alert(
-      "Background Permission Required", 
-      "Please select 'Allow all the time' in the next screen.",
-      [
-        { text: "Open Settings", onPress: () => Linking.openSettings() },
-        { text: "Cancel", style: "cancel" }
-      ]
-    );
-    setIsLoading(false);
-    return;
-  }
+    const { status: fgStatus } = await Location.requestForegroundPermissionsAsync();
+    if (fgStatus !== 'granted') {
+      const { canAskAgain } = await Location.getForegroundPermissionsAsync();
+      setIsLoading(false);
+      if (!canAskAgain) {
+        Alert.alert(
+          "Localisation requise",
+          "Vous avez refusé la localisation. Activez-la dans les paramètres de l'application.",
+          [{ text: "Ouvrir les paramètres", onPress: () => Linking.openSettings() }],
+          { cancelable: false }
+        );
+      }
+      return;
+    }
 
-  await checkStatus();
-};
+    // Foreground granted — start pushing position immediately, regardless of
+    // whether background ("Toujours autoriser") gets granted below.
+    setFgGranted(true);
+
+    const { status: bgStatus } = await Location.requestBackgroundPermissionsAsync();
+    if (bgStatus !== 'granted') {
+      const { canAskAgain } = await Location.getBackgroundPermissionsAsync();
+      Alert.alert(
+        "Suivi en arrière-plan",
+        "Le suivi fonctionne quand l'application est ouverte. Pour le suivi permanent, sélectionnez « Toujours autoriser » dans les réglages.",
+        canAskAgain
+          ? [{ text: "OK" }]
+          : [{ text: "Ouvrir les réglages", onPress: () => Linking.openSettings() }],
+      );
+    }
+
+    await checkStatus();
+  };
   // --- UI RENDERING ---
   const renderEmployeeStatus = () => {
     if (isLoading) {
@@ -97,30 +158,56 @@ const requestForeground = async () => {
       );
     }
 
+    if (fgGranted) {
+      return (
+        <View style={styles.statusContainer}>
+          <Text style={styles.statusTitle}>Localisation</Text>
+          <View style={[styles.badgeContainer, styles.badgeActive]}>
+            <Text style={[styles.badgeText, styles.badgeTextActive]}>● Suivi GPS actif</Text>
+          </View>
+
+          {sendError ? (
+            <Text style={[styles.statusText, { color: '#f87171' }]}>⚠ {sendError}</Text>
+          ) : (
+            <Text style={styles.statusText}>
+              {lastSent
+                ? `Dernière position envoyée à ${new Date(lastSent).toLocaleTimeString()}.`
+                : 'Envoi de votre position en cours…'}
+            </Text>
+          )}
+
+          <Text style={styles.subtleText}>
+            {isTaskRunning
+              ? 'Suivi en arrière-plan actif.'
+              : "Arrière-plan inactif — le suivi ne fonctionne que lorsque l'application est ouverte. Sélectionnez « Toujours autoriser » dans les réglages pour le suivi permanent."}
+          </Text>
+
+          {!isTaskRunning && (
+            <TouchableOpacity style={[styles.button, { marginTop: 14 }]} onPress={() => Linking.openSettings()}>
+              <Text style={styles.buttonText}>Ouvrir les réglages</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      );
+    }
+
     return (
       <View style={styles.statusContainer}>
-        <Text style={styles.statusTitle}>Location Tracking</Text>
+        <Text style={styles.statusTitle}>Localisation requise</Text>
         <Text style={styles.statusText}>
-          We are focusing on Elevator Controls right now.
+          L'application nécessite votre localisation pour fonctionner. Veuillez l'activer pour continuer.
         </Text>
-        <View style={styles.badgeContainer}>
-          <Text style={styles.badgeText}>⚠ Service: OFF</Text>
-        </View>
-        
-        <View style={{marginTop: 20, width: '100%'}}>
-           <TouchableOpacity 
-              style={[styles.button, styles.buttonDisabled]} 
-              onPress={requestForeground} 
-           >
-             <Text style={styles.buttonText}>Activer</Text>
-           </TouchableOpacity>
+        <View style={{ marginTop: 20, width: '100%' }}>
+          <TouchableOpacity style={styles.button} onPress={requestForeground}>
+            <Text style={styles.buttonText}>Activer la localisation</Text>
+          </TouchableOpacity>
         </View>
       </View>
     );
   };
 
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
       <View style={styles.header}>
         <Text style={styles.title}>Welcome, {user.name}!</Text>
         <Text style={styles.roleText}>{user.role}</Text>
@@ -167,19 +254,29 @@ const requestForeground = async () => {
             <Text style={styles.actionCardTitle}>👷 Créer un technicien</Text>
             <Text style={styles.actionCardSubtitle}>Créer les identifiants d'un technicien</Text>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.actionCard, { borderLeftColor: '#0d9488' }]}
+            onPress={() => navigation.navigate('TechnicianManagement')}
+          >
+            <Text style={styles.actionCardTitle}>⚙️ Gérer les techniciens</Text>
+            <Text style={styles.actionCardSubtitle}>Modifier, réinitialiser, télécharger logs GPS</Text>
+          </TouchableOpacity>
         </View>
       )}
 
       {user.role === 'EMPLOYEE' && renderEmployeeStatus()}
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { 
-    flex: 1, 
-    padding: 24, 
+  container: {
+    flex: 1,
     backgroundColor: '#0F172A',
+  },
+  contentContainer: {
+    padding: 24,
+    flexGrow: 1,
   },
   header: {
     marginBottom: 32,
@@ -243,12 +340,18 @@ const styles = StyleSheet.create({
     color: '#F1F5F9',
     marginBottom: 12,
   },
-  statusText: { 
-    textAlign: 'center', 
-    marginBottom: 20, 
+  statusText: {
+    textAlign: 'center',
+    marginBottom: 20,
     color: '#94A3B8',
     fontSize: 15,
     lineHeight: 22,
+  },
+  subtleText: {
+    textAlign: 'center',
+    color: '#64748B',
+    fontSize: 13,
+    lineHeight: 19,
   },
   badgeContainer: {
     backgroundColor: 'rgba(245, 158, 11, 0.15)',
@@ -257,10 +360,16 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     marginBottom: 10,
   },
+  badgeActive: {
+    backgroundColor: 'rgba(34, 197, 94, 0.15)',
+  },
   badgeText: {
     color: '#F59E0B',
     fontWeight: 'bold',
     fontSize: 14,
+  },
+  badgeTextActive: {
+    color: '#22c55e',
   },
   button: {
     backgroundColor: '#3B82F6',
@@ -268,9 +377,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     width: '100%',
-  },
-  buttonDisabled: {
-    backgroundColor: '#334155',
   },
   buttonText: {
     color: '#F8FAFC',

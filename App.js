@@ -8,10 +8,16 @@ import * as Location from 'expo-location';
 import * as SecureStore from 'expo-secure-store';
 import * as Updates from 'expo-updates';
 import * as Application from 'expo-application';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
+import * as Notifications from 'expo-notifications';
 import './i18n';
 
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({ shouldShowAlert: true, shouldPlaySound: true, shouldSetBadge: false }),
+});
+
+import TechnicianManagementScreen from './screens/TechnicianManagementScreen';
 import MapScreen from './screens/MapScreen';
 import AddElevatorScreen from './screens/AddElevatorScreen';
 import ElevatorDetailScreen from './screens/ElevatorDetailScreen';
@@ -27,35 +33,38 @@ const LOCATION_TASK_NAME = 'background-location-task';
 const API_URL = process.env.EXPO_PUBLIC_API_URL;
 
 // ── Background location task (must be defined at module level, before any component) ──
-TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
-  if (error) { console.error('Background Task Error:', error); return; }
-  if (!data || !data.locations || data.locations.length === 0) return;
+// Writes the outcome of every tick to SecureStore key 'bgLoc:last' so the Home
+// screen can show whether background tracking is actually reaching the server.
+async function recordBgResult(obj) {
+  try { await SecureStore.setItemAsync('bgLoc:last', JSON.stringify({ t: Date.now(), ...obj })); } catch {}
+}
 
-  const location = data.locations[0];
+TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
+  if (error) { await recordBgResult({ ok: false, err: String(error.message || error) }); return; }
+
+  const location = data?.locations?.[0];
   if (!location?.coords) return;
 
   try {
     const userJSON = await SecureStore.getItemAsync('currentUser');
     const token    = await SecureStore.getItemAsync('authToken');
 
-    if (!userJSON) {
-      try { await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME); } catch {}
-      return;
-    }
-    const user = JSON.parse(userJSON);
-    if (!token) {
-      try { await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME); } catch {}
-      return;
-    }
+    // A missing user/token on a single tick (e.g. a transient keystore read)
+    // must NOT stop the task — only an explicit logout should. Just skip.
+    if (!userJSON || !token) { await recordBgResult({ ok: false, err: 'no session this tick' }); return; }
 
-    if (user?.id && user.role === 'EMPLOYEE') {
-      await fetch(`${API_URL}/users/${user.id}/location`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ latitude: location.coords.latitude, longitude: location.coords.longitude }),
-      });
-    }
-  } catch {}
+    const user = JSON.parse(userJSON);
+    if (!API_URL || !user?.id || user.role !== 'EMPLOYEE') return;
+
+    const res = await fetch(`${API_URL}/users/${user.id}/location`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ latitude: location.coords.latitude, longitude: location.coords.longitude }),
+    });
+    await recordBgResult({ ok: res.ok, status: res.status });
+  } catch (e) {
+    await recordBgResult({ ok: false, err: String(e?.message || e) });
+  }
 });
 
 // ── OTA update check (JS-only changes via EAS Update) ─────────────────────────
@@ -116,13 +125,29 @@ async function downloadAndInstall(apkUrl) {
 // ── Navigation ────────────────────────────────────────────────────────────────
 const Stack = createNativeStackNavigator();
 
+async function registerPushToken() {
+  try {
+    const { status } = await Notifications.requestPermissionsAsync();
+    if (status !== 'granted') return;
+    const token = (await Notifications.getExpoPushTokenAsync()).data;
+    const authToken = await SecureStore.getItemAsync('authToken');
+    if (!authToken || !API_URL) return;
+    await fetch(`${API_URL}/users/push-token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
+      body: JSON.stringify({ token }),
+    });
+  } catch {}
+}
+
 export default function App() {
   const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
     async function init() {
-      await checkOTAUpdate();     // may restart the app — if it does, code below never runs
-      await checkNativeUpdate();  // shows alert if native build is outdated
+      await checkOTAUpdate();
+      await checkNativeUpdate();
+      await registerPushToken();
       setIsReady(true);
     }
     init();
@@ -158,7 +183,8 @@ export default function App() {
         <Stack.Screen name="AdminInbox"     component={AdminInboxScreen}     options={{ title: 'Service Requests' }} />
         <Stack.Screen name="AssignManager"  component={AssignManagerScreen}  options={{ title: 'Assign Manager' }} />
         <Stack.Screen name="BuildingAccess" component={BuildingAccessScreen} options={{ title: 'Building Access' }} />
-        <Stack.Screen name="CreateEmployee" component={CreateEmployeeScreen} options={{ title: 'Créer un technicien', headerStyle: { backgroundColor: '#0F172A' } }} />
+        <Stack.Screen name="CreateEmployee"          component={CreateEmployeeScreen}          options={{ title: 'Créer un technicien',    headerStyle: { backgroundColor: '#0F172A' } }} />
+        <Stack.Screen name="TechnicianManagement"    component={TechnicianManagementScreen}    options={{ title: 'Gérer les techniciens', headerStyle: { backgroundColor: '#0F172A' } }} />
       </Stack.Navigator>
     </NavigationContainer>
   );
