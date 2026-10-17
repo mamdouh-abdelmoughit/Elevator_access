@@ -1,0 +1,6 @@
+node_modules/
+.next/
+out/
+.env*.local
+# unrelated hardware RTL files, not part of the dashboard
+field/
