@@ -1,0 +1,115 @@
+#include <Arduino.h>
+#include <driver/gpio.h>
+
+// ==========================================
+//      UART BRIDGE PINS
+// ==========================================
+// These pins connect to the Master ESP32 so they can talk
+#define MASTER_RX_PIN 18 // Connect to Master TX (Pin 42)
+#define MASTER_TX_PIN 17 // Connect to Master RX (Pin 41)
+
+// ==========================================
+//      READER PINS (Readers 5 through 8)
+// ==========================================
+#define R5_D0 37
+#define R5_D1 40
+#define R6_D0 41 
+#define R6_D1 42
+#define R7_D0 1
+#define R7_D1 2
+#define R8_D0 35
+#define R8_D1 36
+
+// --- MANUAL DATA STORAGE ---
+volatile unsigned long r5_code = 0; volatile int r5_bitCount = 0; volatile unsigned long r5_lastPulseTime = 0; volatile unsigned long r5_lastMicros = 0; 
+volatile unsigned long r6_code = 0; volatile int r6_bitCount = 0; volatile unsigned long r6_lastPulseTime = 0; volatile unsigned long r6_lastMicros = 0; 
+volatile unsigned long r7_code = 0; volatile int r7_bitCount = 0; volatile unsigned long r7_lastPulseTime = 0; volatile unsigned long r7_lastMicros = 0; 
+volatile unsigned long r8_code = 0; volatile int r8_bitCount = 0; volatile unsigned long r8_lastPulseTime = 0; volatile unsigned long r8_lastMicros = 0; 
+
+// --- ULTRA-FAST INTERRUPT SERVICE ROUTINES (ISRs) ---
+void IRAM_ATTR isr_r5_d0() { unsigned long now = micros(); if (now - r5_lastMicros > 1500) { if (gpio_get_level((gpio_num_t)R5_D0) == 0) { r5_code <<= 1; r5_bitCount++; r5_lastMicros = now; r5_lastPulseTime = millis(); } } }
+void IRAM_ATTR isr_r5_d1() { unsigned long now = micros(); if (now - r5_lastMicros > 1500) { if (gpio_get_level((gpio_num_t)R5_D1) == 0) { r5_code <<= 1; r5_code |= 1; r5_bitCount++; r5_lastMicros = now; r5_lastPulseTime = millis(); } } }
+
+void IRAM_ATTR isr_r6_d0() { unsigned long now = micros(); if (now - r6_lastMicros > 1500) { if (gpio_get_level((gpio_num_t)R6_D0) == 0) { r6_code <<= 1; r6_bitCount++; r6_lastMicros = now; r6_lastPulseTime = millis(); } } }
+void IRAM_ATTR isr_r6_d1() { unsigned long now = micros(); if (now - r6_lastMicros > 1500) { if (gpio_get_level((gpio_num_t)R6_D1) == 0) { r6_code <<= 1; r6_code |= 1; r6_bitCount++; r6_lastMicros = now; r6_lastPulseTime = millis(); } } }
+
+void IRAM_ATTR isr_r7_d0() { unsigned long now = micros(); if (now - r7_lastMicros > 1500) { if (gpio_get_level((gpio_num_t)R7_D0) == 0) { r7_code <<= 1; r7_bitCount++; r7_lastMicros = now; r7_lastPulseTime = millis(); } } }
+void IRAM_ATTR isr_r7_d1() { unsigned long now = micros(); if (now - r7_lastMicros > 1500) { if (gpio_get_level((gpio_num_t)R7_D1) == 0) { r7_code <<= 1; r7_code |= 1; r7_bitCount++; r7_lastMicros = now; r7_lastPulseTime = millis(); } } }
+
+void IRAM_ATTR isr_r8_d0() { unsigned long now = micros(); if (now - r8_lastMicros > 1500) { if (gpio_get_level((gpio_num_t)R8_D0) == 0) { r8_code <<= 1; r8_bitCount++; r8_lastMicros = now; r8_lastPulseTime = millis(); } } }
+void IRAM_ATTR isr_r8_d1() { unsigned long now = micros(); if (now - r8_lastMicros > 1500) { if (gpio_get_level((gpio_num_t)R8_D1) == 0) { r8_code <<= 1; r8_code |= 1; r8_bitCount++; r8_lastMicros = now; r8_lastPulseTime = millis(); } } }
+
+// ==========================================
+//      MAIN SETUP
+// ==========================================
+void setup() {
+  Serial.begin(115200); // For USB debugging
+  
+  // Start the hardware serial bridge to talk to the Master ESP32
+  Serial1.begin(115200, SERIAL_8N1, MASTER_RX_PIN, MASTER_TX_PIN);
+  
+  delay(1000);
+  Serial.println("\n--- BIOSWITCH: SLAVE ESP32 (READERS 5-8) READY ---");
+
+  // --- SETUP PINS ---
+  pinMode(R5_D0, INPUT_PULLUP); pinMode(R5_D1, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(R5_D0), isr_r5_d0, FALLING);
+  attachInterrupt(digitalPinToInterrupt(R5_D1), isr_r5_d1, FALLING);
+
+  pinMode(R6_D0, INPUT_PULLUP); pinMode(R6_D1, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(R6_D0), isr_r6_d0, FALLING);
+  attachInterrupt(digitalPinToInterrupt(R6_D1), isr_r6_d1, FALLING);
+
+  pinMode(R7_D0, INPUT_PULLUP); pinMode(R7_D1, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(R7_D0), isr_r7_d0, FALLING);
+  attachInterrupt(digitalPinToInterrupt(R7_D1), isr_r7_d1, FALLING);
+
+  pinMode(R8_D0, INPUT_PULLUP); pinMode(R8_D1, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(R8_D0), isr_r8_d0, FALLING);
+  attachInterrupt(digitalPinToInterrupt(R8_D1), isr_r8_d1, FALLING);
+}
+
+// ==========================================
+//      MAIN LOOP
+// ==========================================
+void loop() {
+  // --- READER 5 ---
+  if (r5_bitCount > 0 && (millis() - r5_lastPulseTime > 50)) {
+    unsigned long rawCode = r5_code; int bits = r5_bitCount; r5_code = 0; r5_bitCount = 0; 
+    if (bits >= 26) { 
+       unsigned long cleanCode = (rawCode >> 1) & 0x00FFFFFF;
+       Serial.printf("Scanned R5: %lu\n", cleanCode);
+       Serial1.printf("CARD:%lu_R5\n", cleanCode); // Send to Master
+    }
+  }
+
+  // --- READER 6 ---
+  if (r6_bitCount > 0 && (millis() - r6_lastPulseTime > 50)) {
+    unsigned long rawCode = r6_code; int bits = r6_bitCount; r6_code = 0; r6_bitCount = 0; 
+    if (bits >= 26) { 
+       unsigned long cleanCode = (rawCode >> 1) & 0x00FFFFFF;
+       Serial.printf("Scanned R6: %lu\n", cleanCode);
+       Serial1.printf("CARD:%lu_R6\n", cleanCode); // Send to Master
+    }
+  }
+
+  // --- READER 7 ---
+  if (r7_bitCount > 0 && (millis() - r7_lastPulseTime > 50)) {
+    unsigned long rawCode = r7_code; int bits = r7_bitCount; r7_code = 0; r7_bitCount = 0; 
+    if (bits >= 26) { 
+       unsigned long cleanCode = (rawCode >> 1) & 0x00FFFFFF;
+       Serial.printf("Scanned R7: %lu\n", cleanCode);
+       Serial1.printf("CARD:%lu_R7\n", cleanCode); // Send to Master
+    }
+  }
+
+  // --- READER 8 ---
+  if (r8_bitCount > 0 && (millis() - r8_lastPulseTime > 50)) {
+    unsigned long rawCode = r8_code; int bits = r8_bitCount; r8_code = 0; r8_bitCount = 0; 
+    if (bits >= 26) { 
+       unsigned long cleanCode = (rawCode >> 1) & 0x00FFFFFF;
+       Serial.printf("Scanned R8: %lu\n", cleanCode);
+       Serial1.printf("CARD:%lu_R8\n", cleanCode); // Send to Master
+    }
+  }
+}

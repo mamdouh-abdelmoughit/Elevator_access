@@ -1,0 +1,486 @@
+#include <Arduino.h>
+#include <WiFi.h>
+#include <PubSubClient.h>
+#include <ArduinoHttpClient.h>
+#include <ArduinoJson.h>
+#include <vector>
+#include <Wire.h>
+#include <Adafruit_MCP23X17.h> 
+#include <Preferences.h>
+#include <driver/gpio.h>
+
+// ==========================================
+//      USER CONFIGURATION
+// ==========================================
+const char* WIFI_SSID      = "your-ssid";     // redacted
+const char* WIFI_PASSWORD  = "your-password"; // redacted
+const char* BACKEND_SERVER = "https://elevator-backend-664487901469.europe-west1.run.app";
+const int   BACKEND_PORT   = 443;
+const char* MQTT_BROKER    = "broker.hivemq.com"; // replace with your Mosquitto host for production
+const int   MQTT_PORT      = 1883;
+const char* MQTT_USER      = "";   // set to your broker username in production
+const char* MQTT_PASS      = "";   // set to your broker password in production
+Preferences flashMemory; 
+
+// --- READER PINS (Only 1 through 4 remain here!) ---
+#define R1_D0 18  
+#define R1_D1 17
+#define R2_D0 16
+#define R2_D1 15
+#define R3_D0 14
+#define R3_D1 13
+#define R4_D0 35
+#define R4_D1 36
+
+// --- SERIAL BRIDGE PINS ---
+#define SLAVE_RX 1 // Receives data from Slave TX
+#define SLAVE_TX 2 // Sends data to Slave RX (Optional)
+
+// --- MANUAL DATA STORAGE ---
+volatile unsigned long r1_code = 0; volatile int r1_bitCount = 0; volatile unsigned long r1_lastPulseTime = 0; volatile unsigned long r1_lastMicros = 0; 
+volatile unsigned long r2_code = 0; volatile int r2_bitCount = 0; volatile unsigned long r2_lastPulseTime = 0; volatile unsigned long r2_lastMicros = 0; 
+volatile unsigned long r3_code = 0; volatile int r3_bitCount = 0; volatile unsigned long r3_lastPulseTime = 0; volatile unsigned long r3_lastMicros = 0; 
+volatile unsigned long r4_code = 0; volatile int r4_bitCount = 0; volatile unsigned long r4_lastPulseTime = 0; volatile unsigned long r4_lastMicros = 0; 
+
+// --- ULTRA-FAST INTERRUPT SERVICE ROUTINES (ISRs) ---
+void IRAM_ATTR isr_r1_d0() { unsigned long now = micros(); if (now - r1_lastMicros > 1500) { if (gpio_get_level((gpio_num_t)R1_D0) == 0) { r1_code <<= 1; r1_bitCount++; r1_lastMicros = now; r1_lastPulseTime = millis(); } } }
+void IRAM_ATTR isr_r1_d1() { unsigned long now = micros(); if (now - r1_lastMicros > 1500) { if (gpio_get_level((gpio_num_t)R1_D1) == 0) { r1_code <<= 1; r1_code |= 1; r1_bitCount++; r1_lastMicros = now; r1_lastPulseTime = millis(); } } }
+
+void IRAM_ATTR isr_r2_d0() { unsigned long now = micros(); if (now - r2_lastMicros > 1500) { if (gpio_get_level((gpio_num_t)R2_D0) == 0) { r2_code <<= 1; r2_bitCount++; r2_lastMicros = now; r2_lastPulseTime = millis(); } } }
+void IRAM_ATTR isr_r2_d1() { unsigned long now = micros(); if (now - r2_lastMicros > 1500) { if (gpio_get_level((gpio_num_t)R2_D1) == 0) { r2_code <<= 1; r2_code |= 1; r2_bitCount++; r2_lastMicros = now; r2_lastPulseTime = millis(); } } }
+
+void IRAM_ATTR isr_r3_d0() { unsigned long now = micros(); if (now - r3_lastMicros > 1500) { if (gpio_get_level((gpio_num_t)R3_D0) == 0) { r3_code <<= 1; r3_bitCount++; r3_lastMicros = now; r3_lastPulseTime = millis(); } } }
+void IRAM_ATTR isr_r3_d1() { unsigned long now = micros(); if (now - r3_lastMicros > 1500) { if (gpio_get_level((gpio_num_t)R3_D1) == 0) { r3_code <<= 1; r3_code |= 1; r3_bitCount++; r3_lastMicros = now; r3_lastPulseTime = millis(); } } }
+
+void IRAM_ATTR isr_r4_d0() { unsigned long now = micros(); if (now - r4_lastMicros > 1500) { if (gpio_get_level((gpio_num_t)R4_D0) == 0) { r4_code <<= 1; r4_bitCount++; r4_lastMicros = now; r4_lastPulseTime = millis(); } } }
+void IRAM_ATTR isr_r4_d1() { unsigned long now = micros(); if (now - r4_lastMicros > 1500) { if (gpio_get_level((gpio_num_t)R4_D1) == 0) { r4_code <<= 1; r4_code |= 1; r4_bitCount++; r4_lastMicros = now; r4_lastPulseTime = millis(); } } }
+
+// ==========================================
+//      PIN DEFINITIONS
+// ==========================================
+const int RELAY_F1 = 20;
+const int RELAY_F2 = 21;
+const int RELAY_F3 = 47;
+const int RELAY_F4 = 48; 
+const int RELAY_F5 = 37; // Moved to newly freed pin
+const int RELAY_F6 = 40; // Moved to newly freed pin
+const int RELAY_F7 = 38;
+const int RELAY_F8 = 39;
+
+#define I2C_SDA 11
+#define I2C_SCL 12                                      
+#define RELAY_OPEN_DOOR   6   
+#define RELAY_CLOSE_DOOR  4   
+#define RELAY_SHUTDOWN    5                    
+#define RELAY_REV_MODE    9   
+#define RELAY_REV_UP      46  
+#define RELAY_REV_DOWN    3   
+
+
+// --- MCP23017 VIRTUAL PINS (Port A & B) ---
+#define MCP_MONTEE      0
+#define MCP_DESCENTE    1
+#define MCP_GV          2
+#define MCP_PV          3
+#define MCP_INSPECTION  4
+#define MCP_ML1         5
+#define MCP_ML2         6
+#define MCP_IMP_ARRET    7   
+#define MCP_IMP_PV      8
+#define MCP_LIMIT_H     9
+#define MCP_LIMIT_L     10
+#define MCP_SEC_GEN     11
+#define MCP_SEC_PORTE   12
+#define MCP_PHOTO       13
+#define MCP_DOOR_PHYS   14
+#define MCP_FAULT    15  
+
+int THIS_ELEVATOR_ID = -1; 
+String DEVICE_MAC = "";
+
+Adafruit_MCP23X17 mcp;
+WiFiClient wifiClient;
+PubSubClient mqttClient(wifiClient);
+HttpClient httpClient(wifiClient, BACKEND_SERVER, BACKEND_PORT);
+
+struct PermissionRule { unsigned long card_code; int relay_to_activate; };
+std::vector<PermissionRule> permissions;
+struct RelayTimer { int relay_pin; unsigned long turn_off_time; };
+std::vector<RelayTimer> active_relays;
+        
+String lastStatus = "IDLE";
+unsigned long lastDebounceTime = 0;
+
+// Function Prototypes
+void setupWifi();
+bool getElevatorConfig();
+void connectToMqtt();
+void fetchPermissions();
+void mqttCallback(char* topic, byte* payload, unsigned int length);
+void setupPins();
+void checkWiegandReaders();
+void checkRelayTimers();
+void checkElevatorState(); 
+void publishStatus(String status, String details);
+void publishAccessEvent(unsigned long card_code, bool granted);
+void pressCallButton(int relayPin, String floorName, bool isMCP = false);
+void printWhitelist();
+bool checkGlobalAccess(unsigned long card_code);
+void saveOfflineBackup();
+void loadOfflineBackup();
+
+// ==========================================
+//      MAIN SETUP
+// ==========================================
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+  Serial.println("\n--- BIOSWITCH: MASTER ESP32 READY ---");
+
+  // Initialize Serial Bridge to talk to Slave ESP32
+  Serial1.begin(115200, SERIAL_8N1, SLAVE_RX, SLAVE_TX);
+  Serial.println("UART Bridge initialized on RX:1, TX:2");
+
+  Wire.begin(I2C_SDA, I2C_SCL);
+  if (!mcp.begin_I2C(0x20)) {
+  Serial.println("Error: MCP23017 not found! Check wiring.");
+  while (1);
+  }
+
+  // --- READERS 1-4 SETUP ---
+  pinMode(R1_D0, INPUT_PULLUP); pinMode(R1_D1, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(R1_D0), isr_r1_d0, FALLING);
+  attachInterrupt(digitalPinToInterrupt(R1_D1), isr_r1_d1, FALLING);
+
+  pinMode(R2_D0, INPUT_PULLUP); pinMode(R2_D1, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(R2_D0), isr_r2_d0, FALLING);
+  attachInterrupt(digitalPinToInterrupt(R2_D1), isr_r2_d1, FALLING);
+
+  pinMode(R3_D0, INPUT_PULLUP); pinMode(R3_D1, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(R3_D0), isr_r3_d0, FALLING);
+  attachInterrupt(digitalPinToInterrupt(R3_D1), isr_r3_d1, FALLING);
+
+  pinMode(R4_D0, INPUT_PULLUP); pinMode(R4_D1, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(R4_D0), isr_r4_d0, FALLING);
+  attachInterrupt(digitalPinToInterrupt(R4_D1), isr_r4_d1, FALLING);
+
+  setupPins();
+  setupWifi();
+
+  Serial.println("Attempting to reach Backend Server...");
+  if (getElevatorConfig()) {
+    connectToMqtt();
+    fetchPermissions(); 
+  } else {
+    Serial.println("❌ Server unreachable. Booting in OFFLINE MODE...");
+    loadOfflineBackup(); 
+  }                              
+}
+
+void loop() {
+  if (!mqttClient.connected()) connectToMqtt();
+  mqttClient.loop(); 
+  checkRelayTimers();
+  checkElevatorState(); 
+
+  // ==========================================
+  //      CHECK SERIAL BRIDGE (READERS 5-8)
+  // ==========================================
+  if (Serial1.available()) {
+    String msg = Serial1.readStringUntil('\n');
+    Serial.println(">> DEBUG FROM SLAVE WIRE: " + msg);
+    msg.trim();
+    if (msg.startsWith("CARD:")) {
+      int splitIdx = msg.indexOf('_');
+      if (splitIdx > -1) {
+        unsigned long cardCode = msg.substring(5, splitIdx).toInt();
+        String reader = msg.substring(splitIdx + 1);
+        
+        Serial.printf("\n>>> [SLAVE] %s | Clean: %lu\n", reader.c_str(), cardCode);
+        
+        if (checkGlobalAccess(cardCode)) {
+          Serial.println(">> ✅ Access Granted via Slave");
+          if (reader == "R5") pressCallButton(RELAY_F5, "Floor 5");
+          else if (reader == "R6") pressCallButton(RELAY_F6, "Floor 6");
+          else if (reader == "R7") pressCallButton(RELAY_F7, "Floor 7");
+          else if (reader == "R8") pressCallButton(RELAY_F8, "Floor 8");
+        } else {
+          Serial.println(">> ❌ Access Denied via Slave");
+        }
+      }
+    }
+  }
+
+  // ==========================================
+  //      CHECK NATIVE READERS (1-4)
+  // ==========================================
+  if (r1_bitCount > 0 && (millis() - r1_lastPulseTime > 50)) {
+    unsigned long rawCode = r1_code; int bits = r1_bitCount; r1_code = 0; r1_bitCount = 0; 
+    if (bits >= 26) { 
+       unsigned long cleanCode = (rawCode >> 1) & 0x00FFFFFF;
+       Serial.printf("\n>>> Reader 1 Bits: %d | Raw: %lu | Clean: %lu\n", bits, rawCode, cleanCode);
+       if (checkGlobalAccess(cleanCode)) { Serial.println(">> ✅ Access Granted"); pressCallButton(RELAY_F1, "Floor 1"); } 
+       else { Serial.println(">> ❌ Access Denied"); }
+    }
+  }
+
+  if (r2_bitCount > 0 && (millis() - r2_lastPulseTime > 50)) {
+    unsigned long rawCode = r2_code; int bits = r2_bitCount; r2_code = 0; r2_bitCount = 0; 
+    if (bits >= 26) { 
+       unsigned long cleanCode = (rawCode >> 1) & 0x00FFFFFF;
+       Serial.printf("\n>>> Reader 2 Bits: %d | Raw: %lu | Clean: %lu\n", bits, rawCode, cleanCode);
+       if (checkGlobalAccess(cleanCode)) { Serial.println(">> ✅ Access Granted"); pressCallButton(RELAY_F2, "Floor 2"); } 
+       else { Serial.println(">> ❌ Access Denied"); }
+    }
+  }
+
+  if (r3_bitCount > 0 && (millis() - r3_lastPulseTime > 50)) {
+    unsigned long rawCode = r3_code; int bits = r3_bitCount; r3_code = 0; r3_bitCount = 0; 
+    if (bits >= 26) { 
+       unsigned long cleanCode = (rawCode >> 1) & 0x00FFFFFF;
+       Serial.printf("\n>>> Reader 3 Bits: %d | Raw: %lu | Clean: %lu\n", bits, rawCode, cleanCode);
+       if (checkGlobalAccess(cleanCode)) { Serial.println(">> ✅ Access Granted"); pressCallButton(RELAY_F3, "Floor 3"); } 
+       else { Serial.println(">> ❌ Access Denied"); }
+    }
+  }
+
+  if (r4_bitCount > 0 && (millis() - r4_lastPulseTime > 50)) {
+    unsigned long rawCode = r4_code; int bits = r4_bitCount; r4_code = 0; r4_bitCount = 0; 
+    if (bits >= 26) { 
+       unsigned long cleanCode = (rawCode >> 1) & 0x00FFFFFF;
+       Serial.printf("\n>>> Reader 4 Bits: %d | Raw: %lu | Clean: %lu\n", bits, rawCode, cleanCode);
+       if (checkGlobalAccess(cleanCode)) { Serial.println(">> ✅ Access Granted"); pressCallButton(RELAY_F4, "Floor 4"); } 
+       else { Serial.println(">> ❌ Access Denied"); }
+    }
+  }
+}
+
+// ==========================================
+//      HELPER FUNCTIONS
+// ==========================================
+bool checkGlobalAccess(unsigned long card_code) {
+  for (const auto& rule : permissions) {
+    if (rule.card_code == card_code) return true;
+  }
+  return false;
+}
+
+void setupPins() {
+  // --- ESP32 Native Output Relays ---
+  int relayPins[] = {6, 4, 5, 9, 46, 3, 38, 39,RELAY_F1, RELAY_F2, RELAY_F3, RELAY_F4, RELAY_F5, RELAY_F6, RELAY_F7, RELAY_F8};
+  for(int p : relayPins) {
+    pinMode(p, OUTPUT);
+    digitalWrite(p, HIGH); 
+  }
+}
+
+void pressCallButton(int relayPin, String floorName, bool isMCP) {
+  Serial.println(">> Action: Calling elevator to " + floorName);
+  if (isMCP) {
+    Serial.println(">> MCP Routing.");
+    mcp.digitalWrite(relayPin, LOW);  
+    delay(1000);                  
+    mcp.digitalWrite(relayPin, HIGH); 
+  } else {
+    digitalWrite(relayPin, LOW);  
+    delay(1000);                  
+    digitalWrite(relayPin, HIGH); 
+  }
+  Serial.println(">> Call Completed.");
+}
+
+void checkElevatorState() {
+  if (millis() - lastDebounceTime < 500) return; 
+
+  bool m_up       = mcp.digitalRead(MCP_MONTEE) == LOW;
+  bool m_down     = mcp.digitalRead(MCP_DESCENTE) == LOW;
+  bool m_gv       = mcp.digitalRead(MCP_GV) == LOW;
+  bool m_pv       = mcp.digitalRead(MCP_PV) == LOW;
+  bool m_insp     = mcp.digitalRead(MCP_INSPECTION) == LOW;
+  bool s_ml1      = mcp.digitalRead(MCP_ML1) == LOW;
+  bool s_ml2      = mcp.digitalRead(MCP_ML2) == LOW;
+  bool s_imp_stop = mcp.digitalRead(MCP_IMP_ARRET) == LOW;															
+  bool s_imp_pv   = mcp.digitalRead(MCP_IMP_PV) == LOW;
+  bool s_limit_h  = mcp.digitalRead(MCP_LIMIT_H) == LOW;
+  bool s_limit_l  = mcp.digitalRead(MCP_LIMIT_L) == LOW;
+  bool s_photo    = mcp.digitalRead(MCP_PHOTO) == LOW;
+  bool s_door_phys= mcp.digitalRead(MCP_DOOR_PHYS) == LOW;
+  bool s_fault    = mcp.digitalRead(MCP_FAULT) == LOW;
+  bool s_gen_broken  = mcp.digitalRead(MCP_SEC_GEN) == LOW;
+  bool s_door_broken = mcp.digitalRead(MCP_SEC_PORTE) == LOW;
+
+
+
+  String activeStates = "";
+  if (s_gen_broken)  activeStates += "SEC_GENERALE+ ";
+  if (s_door_broken) activeStates += "SEC_PORTE_OPEN + ";
+  if (s_fault)       activeStates += "FAULT_GENERAL + ";														  
+  if (s_limit_h)     activeStates += "LIMIT_HAUT + ";
+  if (s_limit_l)     activeStates += "LIMIT_BAS + ";
+  if (m_insp)        activeStates += "INSPECTION + ";
+  if (m_up)          activeStates += "CMD_MONTEE + ";
+  if (m_down)        activeStates += "CMD_DESCENTE + ";
+  if (m_gv)          activeStates += "CMD_GV + ";
+  if (m_pv)          activeStates += "CMD_PV + ";
+  if (s_ml1)         activeStates += "ML1 + ";
+  if (s_ml2)         activeStates += "ML2 + ";
+  if (s_imp_stop)    activeStates += "IMP_ARRET + ";
+  if (s_imp_pv)      activeStates += "IMP_PV + ";
+  if (s_photo)       activeStates += "OBSTACLE + ";
+  if (s_door_phys)   activeStates += "PORTE_PHYSIQUE_OPEN + ";
+
+
+  if (activeStates.length() > 0 && activeStates.endsWith(" + ")) {
+     activeStates = activeStates.substring(0, activeStates.length() - 3);
+  } else if (activeStates == "") {
+    activeStates = "IDLE";
+  }
+
+  if (activeStates != lastStatus) {
+    lastDebounceTime = millis(); lastStatus = activeStates;
+    Serial.print("[STATE] "); Serial.println(activeStates);
+    publishStatus(activeStates, "FULL_UPDATE");
+  }
+}
+
+void checkRelayTimers() {
+  if (active_relays.empty()) return;
+  unsigned long current_time = millis();
+  for (auto it = active_relays.begin(); it != active_relays.end(); ) {
+    if (current_time >= it->turn_off_time) {
+      digitalWrite(it->relay_pin, HIGH);
+      it = active_relays.erase(it);
+    } else { ++it; }
+  }
+}
+
+// ==========================================
+//      NETWORK & API
+// ==========================================
+bool getElevatorConfig() {
+  DEVICE_MAC = WiFi.macAddress();
+  Serial.print("My Device MAC: "); Serial.println(DEVICE_MAC);
+  String apiPath = "/elevators/identify?mac=" + DEVICE_MAC; 
+  httpClient.get(apiPath);
+  if (httpClient.responseStatusCode() == 200) {
+    JsonDocument doc; deserializeJson(doc, httpClient.responseBody());
+    THIS_ELEVATOR_ID = doc["id"];
+    Serial.printf(">> REGISTERED! ID: %d\n", THIS_ELEVATOR_ID);
+    return true;
+  } 
+  return false;
+}
+
+void fetchPermissions() {
+  Serial.println("Syncing Permissions...");
+  String apiPath = "/permissions/elevator/" + String(THIS_ELEVATOR_ID);
+  httpClient.get(apiPath);
+  if (httpClient.responseStatusCode() == 200) {
+    JsonDocument doc; deserializeJson(doc, httpClient.responseBody());
+    permissions.clear();
+    for (JsonObject rule : doc.as<JsonArray>()) {
+      unsigned long code = strtoul(rule["card"]["code"], NULL, 10);
+      if (code > 0) permissions.push_back({code, 1});
+    }
+    Serial.printf("Permissions Loaded: %d rules.\n", permissions.size());
+    saveOfflineBackup();
+  }
+  printWhitelist(); 
+}
+
+void mqttCallback(char* topic, byte* payload, unsigned int length) {
+  payload[length] = '\0'; String message = (char*)payload;
+  StaticJsonDocument<256> doc; deserializeJson(doc, message);
+  const char* command = doc["command"];
+
+  if (strcmp(command, "UPDATE_PERMISSIONS") == 0) fetchPermissions();
+  else if (strcmp(command, "REMOTE_CONTROL") == 0) {
+    const char* action = doc["action"];
+    if (strcmp(action, "OPEN_DOOR_ON") == 0) { digitalWrite(RELAY_OPEN_DOOR, LOW); Serial.println(">> CMD: OPEN DOOR -> ON"); }
+    else if (strcmp(action, "OPEN_DOOR_OFF") == 0) { digitalWrite(RELAY_OPEN_DOOR, HIGH); Serial.println(">> CMD: OPEN DOOR -> OFF"); }
+    else if (strcmp(action, "CLOSE_DOOR_ON") == 0) { digitalWrite(RELAY_CLOSE_DOOR, LOW); Serial.println(">> CMD: CLOSE DOOR -> ON"); }
+    else if (strcmp(action, "CLOSE_DOOR_OFF") == 0) { digitalWrite(RELAY_CLOSE_DOOR, HIGH); Serial.println(">> CMD: CLOSE DOOR -> OFF"); }
+    else if (strcmp(action, "SHUTDOWN_ON") == 0) { digitalWrite(RELAY_SHUTDOWN, LOW); Serial.println(">> CMD: SHUTDOWN -> ON"); }
+    else if (strcmp(action, "SHUTDOWN_OFF") == 0) { digitalWrite(RELAY_SHUTDOWN, HIGH); Serial.println(">> CMD: SHUTDOWN -> OFF"); }
+    else if (strcmp(action, "REVISION_MODE_ON") == 0) { digitalWrite(RELAY_REV_MODE, LOW); Serial.println(">> CMD: REV MODE -> ON"); }
+    else if (strcmp(action, "REVISION_MODE_OFF") == 0) { digitalWrite(RELAY_REV_MODE, HIGH); Serial.println(">> CMD: REV MODE -> OFF"); }
+    else if (strcmp(action, "REV_MONTEE_ON") == 0) { digitalWrite(RELAY_REV_UP, LOW); Serial.println(">> CMD: REV UP -> ON"); }
+    else if (strcmp(action, "REV_MONTEE_OFF") == 0) { digitalWrite(RELAY_REV_UP, HIGH); Serial.println(">> CMD: REV UP -> OFF"); }
+    else if (strcmp(action, "REV_DESCENTE_ON") == 0) { digitalWrite(RELAY_REV_DOWN, LOW); Serial.println(">> CMD: REV DOWN -> ON"); }
+    else if (strcmp(action, "REV_DESCENTE_OFF") == 0) { digitalWrite(RELAY_REV_DOWN, HIGH); Serial.println(">> CMD: REV DOWN -> OFF"); }
+  }
+}
+
+void publishStatus(String status, String details) {
+  if (!mqttClient.connected()) return;
+  String topic = "elevators/" + String(THIS_ELEVATOR_ID) + "/status";
+  JsonDocument doc; doc["status"] = status; doc["details"] = details;
+  String msg; serializeJson(doc, msg);
+  mqttClient.publish(topic.c_str(), msg.c_str());
+}
+
+void publishAccessEvent(unsigned long card_code, bool granted) {
+  if (!mqttClient.connected()) return;
+  String topic = "elevators/" + String(THIS_ELEVATOR_ID) + "/access_event";
+  JsonDocument doc; doc["card_code"] = String(card_code); doc["reader_id"] = 0; doc["status"] = granted ? "GRANTED" : "DENIED";
+  String msg; serializeJson(doc, msg);
+  mqttClient.publish(topic.c_str(), msg.c_str());
+}
+
+void setupWifi() {
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  while (WiFi.status() != WL_CONNECTED) delay(500);
+  Serial.println("WiFi Connected");
+}
+
+void printWhitelist() {
+  Serial.println("\n--- 📋 CURRENT WHITELIST (Allowed Cards) ---");
+  if (permissions.empty()) Serial.println("⚠️ MEMORY IS EMPTY!");
+  else {
+    for (int i = 0; i < permissions.size(); i++) {
+      Serial.printf("Rule #%d: Card [%lu] -> Relay [%d]\n", i+1, permissions[i].card_code, permissions[i].relay_to_activate);
+    }
+  }
+  Serial.println("--------------------------------------------\n");
+}
+
+void saveOfflineBackup() {
+  flashMemory.begin("atlasbtp", false); 
+  flashMemory.putInt("elev_id", THIS_ELEVATOR_ID);
+  size_t bytes = permissions.size() * sizeof(PermissionRule);
+  flashMemory.putBytes("whitelist", permissions.data(), bytes);
+  flashMemory.end(); 
+  Serial.println("💾 Backup saved to ESP32 Flash.");
+}
+
+void loadOfflineBackup() {
+  flashMemory.begin("atlasbtp", true); 
+  THIS_ELEVATOR_ID = flashMemory.getInt("elev_id", -1);
+  size_t bytes = flashMemory.getBytesLength("whitelist");
+  if (bytes > 0 && bytes % sizeof(PermissionRule) == 0) {
+    int count = bytes / sizeof(PermissionRule);
+    permissions.resize(count);
+    flashMemory.getBytes("whitelist", permissions.data(), bytes);
+    Serial.printf("📂 OFFLINE MODE: Loaded %d rules from Flash!\n", count);
+  }
+  flashMemory.end(); 
+  printWhitelist();
+}
+
+void connectToMqtt() {
+  if (THIS_ELEVATOR_ID == -1) return;
+  mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
+  mqttClient.setCallback(mqttCallback);
+  while (!mqttClient.connected()) {
+    String clientId = "esp32-" + String(THIS_ELEVATOR_ID) + "-" + String(random(999));
+    bool ok = (strlen(MQTT_USER) > 0)
+      ? mqttClient.connect(clientId.c_str(), MQTT_USER, MQTT_PASS)
+      : mqttClient.connect(clientId.c_str());
+    if (ok) {
+      Serial.println("MQTT Connected!");
+      mqttClient.subscribe(("elevators/" + String(THIS_ELEVATOR_ID) + "/commands").c_str());
+    } else {
+      delay(5000);
+    }
+  }
+}

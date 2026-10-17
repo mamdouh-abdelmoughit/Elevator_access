@@ -1,0 +1,363 @@
+// ==========================================================================
+//   BIOSWITCH — CABIN-READER MASTER (CAN bus + 4G/3G cellular)
+// ==========================================================================
+// New elevator variant: ONE reader inside the cabin instead of one reader
+// per floor. The reader is physically wired to an Arduino Nano in the
+// cabin (see nano_cabin_bridge.cpp), which forwards each scan over a CAN
+// bus (MCP2515/TJA1050 -> shaft cable -> SN65HVD230) up to this board.
+// This board also swaps WiFi for a cellular modem (SIM7600-class, 4G/3G)
+// since the top-of-shaft machine room may not have reliable WiFi/ethernet.
+//
+// Scope note: door/shutdown/revision-mode relays and the multi-signal
+// elevator STATE monitoring block from src/main.cpp are intentionally
+// NOT included here yet — whether this client's controller exposes the
+// same signal set is still open (see docs/CABIN_CAN_4G_MIGRATION.md,
+// question #5). This file focuses on: card scan in -> floor+RDC access
+// decision -> car-call relay pulse.
+//
+// See esp32/docs/CABIN_CAN_4G_MIGRATION.md for the full wiring walkthrough
+// and the list of assumptions that still need confirming (exact SIM module,
+// CAN pins, RDC policy, bus bitrate, relay count).
+// ==========================================================================
+
+#include <Arduino.h>
+#include <vector>
+#include <Wire.h>
+#include <Adafruit_MCP23X17.h>
+#include <Preferences.h>
+#include "driver/twai.h"
+
+#define TINY_GSM_RX_BUFFER 1024
+#include <TinyGsmClient.h>
+#include <PubSubClient.h>
+#include <ArduinoHttpClient.h>
+#include <ArduinoJson.h>
+
+// ==========================================
+//      USER CONFIGURATION
+// ==========================================
+// --- Cellular modem (CONFIRM exact module — see doc question #1) ---
+const char* APN          = "internet";   // carrier APN
+const char* APN_USER     = "";
+const char* APN_PASS     = "";
+const char* BACKEND_HOST = "elevator-backend-664487901469.europe-west1.run.app";
+const int   BACKEND_PORT = 443;
+const char* MQTT_BROKER  = "broker.hivemq.com"; // replace with production Mosquitto host
+const int   MQTT_PORT    = 1883;
+const char* MQTT_USER    = "";
+const char* MQTT_PASS    = "";
+
+// --- Modem UART + power pins (CONFIRM against your SIM module board) ---
+#define MODEM_RX_PIN   17
+#define MODEM_TX_PIN   18
+#define MODEM_PWRKEY   14
+#define MODEM_BAUD     115200
+
+// --- CAN (TWAI) pins — to the SN65HVD230 transceiver (CONFIRM wiring) ---
+#define CAN_TX_PIN     GPIO_NUM_4
+#define CAN_RX_PIN     GPIO_NUM_5
+#define CAN_CARD_ID    0x100   // must match nano_cabin_bridge.cpp
+
+// --- Floor relay boards (two MCP23017s: 16 + 2 = 18 car-call outputs) ---
+#define I2C_SDA 11
+#define I2C_SCL 12
+#define MCP_FLOORS_A_ADDR 0x20   // drives floor index 0..15  (0 = RDC)
+#define MCP_FLOORS_B_ADDR 0x21   // drives floor index 16..17
+#define TOTAL_FLOORS 18          // RDC + floors 1..17 for this client
+#define FLOOR_RDC    0
+
+// RDC access policy — see doc question #3. true = every valid card can
+// always reach the ground floor regardless of its assigned-floor permission.
+#define RDC_ALWAYS_GRANTED true
+
+Preferences flashMemory;
+
+Adafruit_MCP23X17 mcpFloorsA;
+Adafruit_MCP23X17 mcpFloorsB;
+
+HardwareSerial SerialAT(1);
+TinyGsm modem(SerialAT);
+TinyGsmClientSecure gsmSecureClient(modem); // HTTPS to backend
+TinyGsmClient gsmMqttClient(modem);         // plain MQTT client
+PubSubClient mqttClient(gsmMqttClient);
+HttpClient httpClient(gsmSecureClient, BACKEND_HOST, BACKEND_PORT);
+
+struct PermissionRule { unsigned long card_code; int floor; };
+std::vector<PermissionRule> permissions;
+
+int THIS_ELEVATOR_ID = -1;
+String DEVICE_ID = "";
+
+// Function Prototypes
+void modemPowerOn();
+bool connectCellular();
+bool getElevatorConfig();
+void connectToMqtt();
+void fetchPermissions();
+void mqttCallback(char* topic, byte* payload, unsigned int length);
+void setupFloorRelays();
+void setupCan();
+void pollCan();
+void pressFloor(int floor);
+int getAssignedFloor(unsigned long card_code);
+void publishAccessEvent(unsigned long card_code, bool granted, int floor);
+void printWhitelist();
+void saveOfflineBackup();
+void loadOfflineBackup();
+
+// ==========================================
+//      MAIN SETUP
+// ==========================================
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+  Serial.println("\n--- BIOSWITCH: CABIN-CAN MASTER READY ---");
+
+  Wire.begin(I2C_SDA, I2C_SCL);
+  setupFloorRelays();
+  setupCan();
+
+  modemPowerOn();
+  SerialAT.begin(MODEM_BAUD, SERIAL_8N1, MODEM_RX_PIN, MODEM_TX_PIN);
+
+  Serial.println("Bringing up cellular link...");
+  if (connectCellular() && getElevatorConfig()) {
+    connectToMqtt();
+    fetchPermissions();
+  } else {
+    Serial.println("Backend unreachable. Booting in OFFLINE MODE...");
+    loadOfflineBackup();
+  }
+}
+
+void loop() {
+  if (mqttClient.connected()) mqttClient.loop();
+  else connectToMqtt();
+
+  pollCan();
+}
+
+// ==========================================
+//      CAN BUS (cabin reader -> here)
+// ==========================================
+void setupCan() {
+  twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT(CAN_TX_PIN, CAN_RX_PIN, TWAI_MODE_NORMAL);
+  twai_timing_config_t t_config = TWAI_TIMING_CONFIG_125KBITS(); // see doc question #4
+  twai_filter_config_t f_config = TWAI_FILTER_CONFIG_ACCEPT_ALL();
+
+  if (twai_driver_install(&g_config, &t_config, &f_config) != ESP_OK) {
+    Serial.println("CAN driver install failed!");
+    return;
+  }
+  if (twai_start() != ESP_OK) {
+    Serial.println("CAN start failed!");
+    return;
+  }
+  Serial.println("CAN bus up (125 kbps).");
+}
+
+void pollCan() {
+  twai_message_t message;
+  if (twai_receive(&message, 0) != ESP_OK) return; // nothing waiting
+
+  if (message.identifier != CAN_CARD_ID || message.data_length_code < 4) return;
+
+  unsigned long cardCode =
+      (unsigned long)message.data[0] |
+      ((unsigned long)message.data[1] << 8) |
+      ((unsigned long)message.data[2] << 16) |
+      ((unsigned long)message.data[3] << 24);
+
+  Serial.printf("\n>>> [CAN] Card scanned: %lu\n", cardCode);
+
+  int floor = getAssignedFloor(cardCode);
+  if (floor >= 0) {
+    Serial.printf(">> Access Granted -> Floor %d\n", floor);
+    if (RDC_ALWAYS_GRANTED && floor != FLOOR_RDC) pressFloor(FLOOR_RDC);
+    pressFloor(floor);
+    publishAccessEvent(cardCode, true, floor);
+  } else {
+    Serial.println(">> Access Denied (unknown card)");
+    publishAccessEvent(cardCode, false, -1);
+  }
+}
+
+// ==========================================
+//      FLOOR RELAYS
+// ==========================================
+void setupFloorRelays() {
+  if (!mcpFloorsA.begin_I2C(MCP_FLOORS_A_ADDR)) {
+    Serial.println("Error: MCP23017 A (floors 0-15) not found!");
+  }
+  if (!mcpFloorsB.begin_I2C(MCP_FLOORS_B_ADDR)) {
+    Serial.println("Error: MCP23017 B (floors 16-17) not found!");
+  }
+  for (int i = 0; i < 16; i++) { mcpFloorsA.pinMode(i, OUTPUT); mcpFloorsA.digitalWrite(i, HIGH); }
+  for (int i = 0; i < (TOTAL_FLOORS - 16); i++) { mcpFloorsB.pinMode(i, OUTPUT); mcpFloorsB.digitalWrite(i, HIGH); }
+}
+
+void pressFloor(int floor) {
+  if (floor < 0 || floor >= TOTAL_FLOORS) return;
+  Serial.printf(">> Pressing car-call button for floor %d\n", floor);
+  if (floor < 16) {
+    mcpFloorsA.digitalWrite(floor, LOW);
+    delay(1000);
+    mcpFloorsA.digitalWrite(floor, HIGH);
+  } else {
+    int pin = floor - 16;
+    mcpFloorsB.digitalWrite(pin, LOW);
+    delay(1000);
+    mcpFloorsB.digitalWrite(pin, HIGH);
+  }
+}
+
+int getAssignedFloor(unsigned long card_code) {
+  for (const auto& rule : permissions) {
+    if (rule.card_code == card_code) return rule.floor;
+  }
+  return -1;
+}
+
+// ==========================================
+//      CELLULAR MODEM
+// ==========================================
+void modemPowerOn() {
+  pinMode(MODEM_PWRKEY, OUTPUT);
+  digitalWrite(MODEM_PWRKEY, HIGH);
+  delay(100);
+  digitalWrite(MODEM_PWRKEY, LOW); // most SIM7600-class modules power on with a LOW pulse
+  delay(1000);
+  digitalWrite(MODEM_PWRKEY, HIGH);
+  delay(3000); // let the modem boot before talking to it
+}
+
+bool connectCellular() {
+  Serial.println("Initializing modem...");
+  if (!modem.init()) {
+    Serial.println("Modem init failed.");
+    return false;
+  }
+  Serial.print("Modem: "); Serial.println(modem.getModemInfo());
+
+  Serial.print("Waiting for network...");
+  if (!modem.waitForNetwork(60000L)) {
+    Serial.println(" failed.");
+    return false;
+  }
+  Serial.println(" connected.");
+
+  Serial.printf("Connecting to APN '%s'...\n", APN);
+  if (!modem.gprsConnect(APN, APN_USER, APN_PASS)) {
+    Serial.println("GPRS/data connect failed.");
+    return false;
+  }
+  Serial.println("Cellular data link up.");
+  return true;
+}
+
+// ==========================================
+//      NETWORK & API  (same shape as main.cpp)
+// ==========================================
+bool getElevatorConfig() {
+  DEVICE_ID = modem.getIMEI();
+  Serial.print("My Device IMEI: "); Serial.println(DEVICE_ID);
+  String apiPath = "/elevators/identify?mac=" + DEVICE_ID; // reuse identify-by-id endpoint
+  httpClient.get(apiPath);
+  if (httpClient.responseStatusCode() == 200) {
+    JsonDocument doc; deserializeJson(doc, httpClient.responseBody());
+    THIS_ELEVATOR_ID = doc["id"];
+    Serial.printf(">> REGISTERED! ID: %d\n", THIS_ELEVATOR_ID);
+    return true;
+  }
+  return false;
+}
+
+void fetchPermissions() {
+  Serial.println("Syncing Permissions...");
+  String apiPath = "/permissions/elevator/" + String(THIS_ELEVATOR_ID);
+  httpClient.get(apiPath);
+  if (httpClient.responseStatusCode() == 200) {
+    JsonDocument doc; deserializeJson(doc, httpClient.responseBody());
+    permissions.clear();
+    for (JsonObject rule : doc.as<JsonArray>()) {
+      unsigned long code = strtoul(rule["card"]["code"], NULL, 10);
+      int floor = rule["relay"] | -1; // "relay" field repurposed as floor number
+      if (code > 0 && floor >= 0 && floor < TOTAL_FLOORS) {
+        permissions.push_back({code, floor});
+      }
+    }
+    Serial.printf("Permissions Loaded: %d rules.\n", permissions.size());
+    saveOfflineBackup();
+  }
+  printWhitelist();
+}
+
+void mqttCallback(char* topic, byte* payload, unsigned int length) {
+  payload[length] = '\0'; String message = (char*)payload;
+  StaticJsonDocument<256> doc; deserializeJson(doc, message);
+  const char* command = doc["command"];
+  if (command && strcmp(command, "UPDATE_PERMISSIONS") == 0) fetchPermissions();
+}
+
+void publishAccessEvent(unsigned long card_code, bool granted, int floor) {
+  if (!mqttClient.connected()) return;
+  String topic = "elevators/" + String(THIS_ELEVATOR_ID) + "/access_event";
+  JsonDocument doc;
+  doc["card_code"] = String(card_code);
+  doc["reader_id"] = 0; // single cabin reader
+  doc["status"] = granted ? "GRANTED" : "DENIED";
+  doc["floor"] = floor;
+  String msg; serializeJson(doc, msg);
+  mqttClient.publish(topic.c_str(), msg.c_str());
+}
+
+void connectToMqtt() {
+  if (THIS_ELEVATOR_ID == -1) return;
+  mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
+  mqttClient.setCallback(mqttCallback);
+  String clientId = "esp32-cabin-" + String(THIS_ELEVATOR_ID) + "-" + String(random(999));
+  bool ok = (strlen(MQTT_USER) > 0)
+    ? mqttClient.connect(clientId.c_str(), MQTT_USER, MQTT_PASS)
+    : mqttClient.connect(clientId.c_str());
+  if (ok) {
+    Serial.println("MQTT Connected!");
+    mqttClient.subscribe(("elevators/" + String(THIS_ELEVATOR_ID) + "/commands").c_str());
+  }
+}
+
+// ==========================================
+//      OFFLINE FLASH BACKUP (same as main.cpp)
+// ==========================================
+void printWhitelist() {
+  Serial.println("\n--- CURRENT WHITELIST (card -> floor) ---");
+  if (permissions.empty()) Serial.println("MEMORY IS EMPTY!");
+  else {
+    for (size_t i = 0; i < permissions.size(); i++) {
+      Serial.printf("Rule #%d: Card [%lu] -> Floor [%d]\n", (int)i + 1, permissions[i].card_code, permissions[i].floor);
+    }
+  }
+  Serial.println("--------------------------------------------\n");
+}
+
+void saveOfflineBackup() {
+  flashMemory.begin("atlasbtp_cabin", false);
+  flashMemory.putInt("elev_id", THIS_ELEVATOR_ID);
+  size_t bytes = permissions.size() * sizeof(PermissionRule);
+  flashMemory.putBytes("whitelist", permissions.data(), bytes);
+  flashMemory.end();
+  Serial.println("Backup saved to ESP32 Flash.");
+}
+
+void loadOfflineBackup() {
+  flashMemory.begin("atlasbtp_cabin", true);
+  THIS_ELEVATOR_ID = flashMemory.getInt("elev_id", -1);
+  size_t bytes = flashMemory.getBytesLength("whitelist");
+  if (bytes > 0 && bytes % sizeof(PermissionRule) == 0) {
+    int count = bytes / sizeof(PermissionRule);
+    permissions.resize(count);
+    flashMemory.getBytes("whitelist", permissions.data(), bytes);
+    Serial.printf("OFFLINE MODE: Loaded %d rules from Flash!\n", count);
+  }
+  flashMemory.end();
+  printWhitelist();
+}
