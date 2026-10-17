@@ -3,76 +3,61 @@ import prisma from '../../db/prismaClient.js';
 import { publish } from '../../services/mqttService.js';
 import { get as getEnrollmentState } from '../../services/enrollmentService.js';
 import { createLog } from '../../services/logService.js';
+import { isExpired, notifyDevice } from '../../services/accessRules.js';
 
 // --- FUNCTION 1: Handles regular card swipes ---
-export const handleAccessEvent = async (elevatorId, cardCode) => {
-  const cardCodeString = cardCode.toString();
-  console.log(`Processing access request for Card [${cardCodeString}] at Elevator [${elevatorId}]`);
+// Cabin firmware publishes the decision it already took locally:
+//   { card_code, status: "GRANTED"|"DENIED", floors: [0,2,5], reason?, free_access? }
+// We enrich it with the resident's identity and store it as the access log.
+// If the device's cached whitelist disagrees with the database (e.g. a block
+// that hasn't reached it yet), we log that and push a resync.
+// Older firmware sends only { card_code }: then the backend decides, as before.
+export const handleAccessEvent = async (elevatorId, payload) => {
+  const cardCodeString = payload.card_code.toString();
+  console.log(`Processing access event for Card [${cardCodeString}] at Elevator [${elevatorId}]`);
 
   try {
-    // 1) Find the card record first (explicit, clear)
     const card = await prisma.card.findUnique({
-      where: { code: cardCodeString } // <<-- use the string code
+      where: { code: cardCodeString },
+      include: { permissions: { where: { elevatorId } } },
     });
+    const perms = card?.permissions || [];
+    const expired = !!card && isExpired(card);
+    const dbAllows = perms.length > 0 && perms.every(p => p.isActive) && !expired;
+    const dbFloors = perms.map(p => p.relay).sort((a, b) => a - b);
 
-    // If no card found, deny immediately and log the attempt
-    if (!card) {
-      console.log(`Access DENIED. Unknown card [${cardCodeString}].`);
-      createLog("ACCESS_ATTEMPT", {
-        cardCode: cardCodeString,
-        status: "DENIED",
-        reason: "UNKNOWN_CARD"
-      }, elevatorId);
+    let dbReason = null;
+    if (!card) dbReason = 'UNKNOWN_CARD';
+    else if (perms.length === 0) dbReason = 'NO_PERMISSION';
+    else if (expired) dbReason = 'EXPIRED';
+    else if (!dbAllows) dbReason = 'BLOCKED';
 
-      // Publish DENIED back to device (use commands topic so device subscribed receives it)
-      const denyTopic = `elevators/${elevatorId}/commands`;
-      publish(denyTopic, JSON.stringify({
-        command: 'ACCESS_RESPONSE',
-        status: 'DENIED',
-        card_code: cardCodeString
-      }));
-      return;
-    }
+    const fromDevice = payload.status === 'GRANTED' || payload.status === 'DENIED';
+    const status = fromDevice ? payload.status : (dbAllows ? 'GRANTED' : 'DENIED');
+    const floors = fromDevice ? (Array.isArray(payload.floors) ? payload.floors : []) : dbFloors;
+    const outOfSync = fromDevice && !payload.free_access && (status === 'GRANTED') !== dbAllows;
+    // Swipes buffered by the device while MQTT was down carry their age.
+    const agoMs = Number(payload.ago_ms) || 0;
+    const delayed = agoMs > 5000;
 
-    // 2) Card exists — check permission records using card.id
-    const permission = await prisma.permission.findFirst({
-      where: {
-        elevatorId: elevatorId,
-        cardId: card.id
-      }
-    });
+    await createLog("ACCESS_ATTEMPT", {
+      cardCode: cardCodeString,
+      status,
+      reason: status === 'DENIED' ? (dbReason || 'DEVICE_OUT_OF_SYNC') : null,
+      floors,
+      freeAccess: !!payload.free_access,
+      cardId: card?.id ?? null,
+      residentName: card?.label ?? null,
+      apartment: card?.apartment ?? null,
+      homeFloor: card?.homeFloor ?? null,
+      outOfSync,
+      delayed,
+      source: fromDevice ? 'device' : 'backend',
+    }, elevatorId, delayed ? new Date(Date.now() - agoMs) : null);
 
-    // 3) Build response and log
-    const responseTopic = `elevators/${elevatorId}/commands`; // publish on commands (device listens here)
-    if (permission) {
-      console.log(`Access GRANTED for card ${cardCodeString}. Relay: ${permission.relay}`);
-      createLog("ACCESS_ATTEMPT", {
-        cardCode: cardCodeString,
-        status: "GRANTED",
-        relayActivated: permission.relay
-      }, elevatorId);
-
-      const msg = {
-        command: 'ACCESS_RESPONSE',
-        status: 'GRANTED',
-        card_code: cardCodeString,
-        relay: permission.relay
-      };
-     // publish(responseTopic, JSON.stringify(msg));
-    } else {
-      console.log(`Access DENIED. Card ${cardCodeString} has no permission for elevator ${elevatorId}.`);
-      createLog("ACCESS_ATTEMPT", {
-        cardCode: cardCodeString,
-        status: "DENIED",
-        reason: "NO_PERMISSION"
-      }, elevatorId);
-
-      const msg = {
-        command: 'ACCESS_RESPONSE',
-        status: 'DENIED',
-        card_code: cardCodeString
-      };
-      publish(responseTopic, JSON.stringify(msg));
+    if (outOfSync) {
+      console.warn(`Elevator ${elevatorId} whitelist out of sync for card ${cardCodeString} — pushing UPDATE_PERMISSIONS`);
+      notifyDevice(elevatorId);
     }
   } catch (error) {
     console.error("Error processing access event:", error);

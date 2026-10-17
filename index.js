@@ -15,6 +15,7 @@ import requestRoutes from './src/api/routes/requestRoutes.js';
 
 import { connect as mqttConnect } from './src/services/mqttService.js';
 import { initializeEventListeners } from './src/events/eventListeners.js';
+import { startBackgroundJobs } from './src/services/offlineDetectionService.js';
 import auth from './src/middleware/auth.js';
 
 const PORT = process.env.PORT || 3000;
@@ -90,4 +91,5 @@ app.listen(PORT, '0.0.0.0', async () => {
   console.log(`Server listening on port ${PORT}`);
   await mqttConnect();
   initializeEventListeners();
+  startBackgroundJobs();
 });

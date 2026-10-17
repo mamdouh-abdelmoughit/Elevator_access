@@ -55,9 +55,16 @@ export async function getAllPermissionsForAdmin(req, res) {
 export async function getPermissionsForDevice(req, res) {
     try {
         const elevatorId = parseInt(req.params.id);
+        // Active rows of non-expired cards only. One row per (card, floor):
+        // the firmware ORs the rows of a card into a floor bitmask.
         const permissions = await prisma.permission.findMany({
-            where: { elevatorId: elevatorId, isActive: true }, // <--- Filter
-            include: { card: { select: { code: true } } }
+            where: {
+                elevatorId: elevatorId,
+                isActive: true,
+                card: { OR: [{ validUntil: null }, { validUntil: { gt: new Date() } }] },
+            },
+            select: { relay: true, card: { select: { code: true } } },
+            orderBy: [{ cardId: 'asc' }, { relay: 'asc' }],
         });
         res.json(permissions);
     } catch (error) {

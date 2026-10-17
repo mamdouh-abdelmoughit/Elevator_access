@@ -6,6 +6,7 @@ import { createLog } from './logService.js';
 const MQTT_BROKER   = process.env.MQTT_BROKER_URL  || 'mqtt://broker.hivemq.com:1883';
 const MQTT_USERNAME = process.env.MQTT_USERNAME     || '';
 const MQTT_PASSWORD = process.env.MQTT_PASSWORD     || '';
+const MQTT_SHARED_GROUP = process.env.MQTT_SHARED_GROUP || '';
 
 // Cache of known elevator IDs — refreshed every 5 minutes
 let knownElevatorIds = new Set();
@@ -43,9 +44,13 @@ export function connect() {
 
     client.on('connect', () => {
       console.log(`MQTT connected to ${MQTT_BROKER}`);
-      client.subscribe('elevators/+/access_event');
-      client.subscribe('elevators/+/enrollment_event');
-      client.subscribe('elevators/+/status');
+      // With several Cloud Run instances each one would receive (and log) every
+      // device message. Setting MQTT_SHARED_GROUP makes the broker deliver each
+      // message to only one instance (MQTT shared subscription).
+      const prefix = MQTT_SHARED_GROUP ? `$share/${MQTT_SHARED_GROUP}/` : '';
+      client.subscribe(`${prefix}elevators/+/access_event`);
+      client.subscribe(`${prefix}elevators/+/enrollment_event`);
+      client.subscribe(`${prefix}elevators/+/status`);
       resolve();
     });
 
@@ -81,11 +86,19 @@ export function connect() {
         try {
           const data = JSON.parse(payloadString);
           const newStatus = data.code ? `${data.status}_${data.code}` : data.status;
+          // Every status message (incl. the 30 s HEARTBEAT) proves the device is
+          // alive; only an actual change of state is written to the log.
+          const previous = await prisma.elevator.findUnique({
+            where: { id: elevatorId }, select: { currentStatus: true },
+          });
+          // "OFFLINE" is the device's MQTT last-will: it must not count as a heartbeat.
           await prisma.elevator.update({
             where: { id: elevatorId },
-            data: { currentStatus: newStatus, lastHeartbeat: new Date() },
+            data: { currentStatus: newStatus, ...(newStatus !== 'OFFLINE' && { lastHeartbeat: new Date() }) },
           });
-          await createLog('STATE_CHANGE', { status: newStatus, raw: data }, elevatorId);
+          if (previous?.currentStatus !== newStatus) {
+            await createLog('STATE_CHANGE', { status: newStatus, previous: previous?.currentStatus ?? null, raw: data }, elevatorId);
+          }
         } catch (e) {
           console.error('Error updating elevator status:', e.message);
         }

@@ -18,12 +18,25 @@ model User {
   managedElevators  Elevator[] // Elevators this Syndic manages
   requests          Request[]  // Requests sent by this Syndic
   
-  // ... keep existing location fields ...
   createdAt         DateTime @default(now())
   latitude          Float?
   longitude         Float?
   locationUpdatedAt DateTime?
+  isOnline          Boolean  @default(false)
+  expoPushToken     String?
   cards             Card[]
+  locationLogs      LocationLog[]
+}
+
+model LocationLog {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  latitude  Float
+  longitude Float
+  timestamp DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@index([userId, timestamp])
 }
 
 model Elevator {
@@ -45,6 +58,17 @@ model Elevator {
   macAddress    String?  @unique
   createdAt     DateTime @default(now())
   permissions   Permission[]
+
+  // Cabin-reader elevators: highest floor number (RDC = 0, floors 1..floorCount).
+  // Set by the Syndic when configuring the building. Null = not configured yet
+  // (or an older per-floor-reader elevator).
+  floorCount    Int?
+  // Top floor (terrasse / roof) is reachable by every resident.
+  roofAccess    Boolean  @default(true)
+  // How long the allowed car-call buttons stay unlocked after a valid swipe.
+  unlockSeconds Int      @default(10)
+  // "Accès libre": every floor button unlocked, no card needed (moving day, etc.).
+  freeAccess    Boolean  @default(false)
 }
 
 model Card {
@@ -57,7 +81,18 @@ model Card {
   userId    Int?
   user      User?    @relation(fields: [userId], references: [id])
   createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
   permissions Permission[]
+
+  // Resident profile (cabin-reader elevators). The Permission rows of a card
+  // are always derived from these fields — see src/services/accessRules.js.
+  apartment     String?
+  residentPhone String?
+  homeFloor     Int?
+  accessType    String    @default("RESIDENT") // RESIDENT | STAFF | CUSTOM
+  customFloors  Int[]     @default([])         // only used when accessType = CUSTOM
+  validUntil    DateTime?                      // null = permanent
+  notes         String?
 }
 
 // NEW MODEL: The Communication Ticket
@@ -88,7 +123,7 @@ model Permission {
   id         Int      @id @default(autoincrement())
   cardId     Int
   elevatorId Int
-  relay      Int
+  relay      Int      // cabin-reader elevators: floor number (0 = RDC)
   isActive   Boolean  @default(true)  // <--- ADD THIS
   card       Card     @relation(fields: [cardId], references: [id])
   elevator   Elevator @relation(fields: [elevatorId], references: [id])

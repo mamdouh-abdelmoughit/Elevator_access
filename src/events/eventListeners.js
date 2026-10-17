@@ -29,7 +29,7 @@ export function initializeEventListeners() {
           console.warn('Missing card_code in payload', parsedPayload);
           return;
         }
-        handleAccessEvent(elevatorId, cardCode);
+        handleAccessEvent(elevatorId, { ...parsedPayload, card_code: cardCode });
       } else if (event === 'enrollment_event' || event === 'enrollment') {
         const newCardCode = parsedPayload.new_card_code?.toString();
         if (!newCardCode) {

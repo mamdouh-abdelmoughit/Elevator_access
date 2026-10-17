@@ -4,8 +4,9 @@ import { createPermission, deletePermission ,getAllPermissionsForAdmin,
     getPermissionsForDevice, getResidentsForSyndic ,
     togglePermissionStatus} from '../controllers/permissionController.js';
 import auth from '../../middleware/auth.js';
+import deviceAuth from '../../middleware/deviceAuth.js';
 
-router.get('/elevator/:id', getPermissionsForDevice);
+router.get('/elevator/:id', deviceAuth, getPermissionsForDevice);
 
 router.use(auth);
 router.post('/', createPermission);

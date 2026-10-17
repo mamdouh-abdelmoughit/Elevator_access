@@ -1,0 +1,14 @@
+-- Building settings for cabin-reader elevators
+ALTER TABLE "Elevator" ADD COLUMN "roofAccess" BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE "Elevator" ADD COLUMN "unlockSeconds" INTEGER NOT NULL DEFAULT 10;
+ALTER TABLE "Elevator" ADD COLUMN "freeAccess" BOOLEAN NOT NULL DEFAULT false;
+
+-- Resident profile on cards
+ALTER TABLE "Card" ADD COLUMN "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE "Card" ADD COLUMN "apartment" TEXT;
+ALTER TABLE "Card" ADD COLUMN "residentPhone" TEXT;
+ALTER TABLE "Card" ADD COLUMN "homeFloor" INTEGER;
+ALTER TABLE "Card" ADD COLUMN "accessType" TEXT NOT NULL DEFAULT 'RESIDENT';
+ALTER TABLE "Card" ADD COLUMN "customFloors" INTEGER[] DEFAULT ARRAY[]::INTEGER[];
+ALTER TABLE "Card" ADD COLUMN "validUntil" TIMESTAMP(3);
+ALTER TABLE "Card" ADD COLUMN "notes" TEXT;
