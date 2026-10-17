@@ -1,107 +1,74 @@
-// App.js
-import React from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+// App.js — Syndic Portal
+import React, { useEffect, useState } from 'react';
+import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
+import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-
-import * as TaskManager from 'expo-task-manager';
-import * as Location from 'expo-location';
-import * as SecureStore from 'expo-secure-store'; // <-- IMPORT
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import './i18n';
 
-// screens
+import { getSession, clearSession, setUnauthorizedHandler } from './src/api';
+import { ToastProvider } from './src/components/ui';
+import { C } from './src/theme';
+
 import LoginScreen from './screens/LoginScreen';
-import HomeScreen from './screens/HomeScreen';
 import SignupScreen from './screens/SignupScreen';
-import DashboardScreen from './screens/DashboardScreen'; // Was SyndicScreen
+import BuildingsScreen from './screens/BuildingsScreen';
+import BuildingSetupScreen from './screens/BuildingSetupScreen';
+import BuildingScreen from './screens/BuildingScreen';
+import ResidentFormScreen from './screens/ResidentFormScreen';
+import ResidentDetailScreen from './screens/ResidentDetailScreen';
+import RequestsScreen from './screens/RequestsScreen';
 
-//const LOCATION_TASK_NAME = 'background-location-task';
-// Use your backend address (same as other screens). If you run backend on device/emulator, adjust accordingly.
-//const API_URL = 'http://192.168.11.251:3000';
-
-// Background task definition.
-// This task runs even when the app is backgrounded (Expo taskManager + location set up required).
-/*TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
-  if (error) {
-    console.error('Background Task Error:', error);
-    return;
-  }
-
-
-  if (!data || !data.locations || data.locations.length === 0) {
-    // Nothing to do
-    return;
-  }
-
-  const location = data.locations[0];
-  if (!location || !location.coords) return;
-
-  console.log('Background location received:', location.coords);
-
-  try {
-    // 1. Read the saved user data from secure storage.
-    const userJSON = await SecureStore.getItemAsync('currentUser');
-    const token = await SecureStore.getItemAsync('authToken');
-
-    if (!userJSON) {
-      console.error('Background Task: Could not find user in storage. Stopping location updates.');
-      // stop location updates to avoid continuing to run unnecessarily
-      try { await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME); } catch (e) {}
-      return;
-    }
-    const user = JSON.parse(userJSON);
-
-    if (!token) {
-      console.error('Background Task: No auth token found. Stopping location updates.');
-      try { await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME); } catch (e) {}
-      return;
-    }
-
-    // 2. We only send updates for employees.
-    if (user && user.id && user.role === 'EMPLOYEE') {
-      try {
-        // 3. Send the location to the backend with the correct user ID.
-        const resp = await fetch(`${API_URL}/users/${user.id}/location`, {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify({
-            latitude: location.coords.latitude,
-            longitude: location.coords.longitude,
-          }),
-        });
-
-        if (!resp.ok) {
-          // Log non-200 responses for debugging
-          const text = await resp.text().catch(() => '');
-          console.error(`Background Task: Failed to send location. Status: ${resp.status} - ${text}`);
-        } else {
-          console.log(`Background location for user ${user.id} sent to server.`);
-        }
-      } catch (e) {
-        console.error('Background Task: Failed to send location:', e);
-      }
-    } else {
-      console.log('Background Task: User is not an employee, or no user data found. No location sent.');
-    }
-  } catch (e) {
-    console.error('Background Task: Unexpected error', e);
-  }
-});
-*/
-// Navigation stack
 const Stack = createNativeStackNavigator();
+const navigationRef = createNavigationContainerRef();
 
 export default function App() {
+  const [initialRoute, setInitialRoute] = useState(null);
+
+  useEffect(() => {
+    // Already logged in as a Syndic -> straight to the buildings.
+    getSession().then(({ token, user }) => {
+      setInitialRoute(token && user?.role === 'MANAGER' ? 'Buildings' : 'Login');
+    });
+    setUnauthorizedHandler(async () => {
+      await clearSession();
+      if (navigationRef.isReady()) navigationRef.reset({ index: 0, routes: [{ name: 'Login' }] });
+    });
+  }, []);
+
+  if (!initialRoute) {
+    return (
+      <View style={styles.splash}>
+        <Text style={styles.splashTitle}>Espace Syndic</Text>
+        <ActivityIndicator color="#fff" style={{ marginTop: 20 }} />
+      </View>
+    );
+  }
+
   return (
-    <NavigationContainer>
-      <Stack.Navigator initialRouteName="Login">
-        <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
-        <Stack.Screen name="Signup" component={SignupScreen} options={{ title: 'Create Account' }} />
-        <Stack.Screen name="Home" component={HomeScreen} options={{ title: 'Elevator Dashboard' }} />
-        <Stack.Screen name="Dashboard" component={DashboardScreen} options={{ title: 'My Residence' }} />
-      </Stack.Navigator>
-    </NavigationContainer>
+    <SafeAreaProvider>
+      <ToastProvider>
+        <NavigationContainer ref={navigationRef}>
+          <Stack.Navigator
+            initialRouteName={initialRoute}
+            screenOptions={{ headerShown: false, contentStyle: { backgroundColor: C.bg }, animation: 'slide_from_right' }}
+          >
+            <Stack.Screen name="Login" component={LoginScreen} />
+            <Stack.Screen name="Signup" component={SignupScreen} options={{ headerShown: true, title: 'Créer un compte' }} />
+            <Stack.Screen name="Buildings" component={BuildingsScreen} />
+            <Stack.Screen name="BuildingSetup" component={BuildingSetupScreen} />
+            <Stack.Screen name="Building" component={BuildingScreen} />
+            <Stack.Screen name="ResidentForm" component={ResidentFormScreen} options={{ animation: 'slide_from_bottom' }} />
+            <Stack.Screen name="ResidentDetail" component={ResidentDetailScreen} />
+            <Stack.Screen name="Requests" component={RequestsScreen} />
+          </Stack.Navigator>
+        </NavigationContainer>
+      </ToastProvider>
+    </SafeAreaProvider>
   );
 }
+
+const styles = StyleSheet.create({
+  splash: { flex: 1, backgroundColor: C.brand, justifyContent: 'center', alignItems: 'center' },
+  splashTitle: { color: '#fff', fontSize: 26, fontWeight: '800' },
+});
